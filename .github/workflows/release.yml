@@ -68,7 +68,7 @@ jobs:
           curl -fsSL -o ../tools/runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
           chmod +x ../tools/appimagetool
       - name: Build the AppImage
-        run: ./packaging/build-appimage.sh
+        run: /packaging/build-appimage.sh
       - name: Smoke test
         run: ./dist/ProjectFCG-x86_64.AppImage --appimage-extract-and-run --self-test
       - name: Attach to the release
