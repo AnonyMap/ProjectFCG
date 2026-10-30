@@ -1,0 +1,146 @@
+# Builds ProjectFCG for Linux (.AppImage), Windows (.exe) and macOS (.dmg)
+# whenever a release is published on GitHub, and attaches the files to it.
+#
+#   1. Bump `version` in Cargo.toml and push.
+#   2. GitHub ▸ Releases ▸ Draft a new release ▸ tag e.g. v0.7.0 ▸ Publish.
+#   3. A few minutes later the three downloads appear on the release.
+#
+# To rebuild an existing release (say a build failed): Actions ▸ Release
+# builds ▸ Run workflow, and give the tag.
+
+name: Release builds
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of an existing release to build and upload to (e.g. v0.7.0)
+        required: true
+
+permissions:
+  contents: write # upload files to the release
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+      - name: Version check
+        shell: bash
+        run: |
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "v$v" != "$TAG" ] && [ "$v" != "$TAG" ]; then
+            echo "::warning::Release tag $TAG doesn't match Cargo.toml version $v (the app will report $v)."
+          fi
+      - name: Run the tests
+        run: cargo test --release --locked
+
+  linux:
+    name: Linux AppImage
+    needs: test
+    # The oldest supported Ubuntu, so the AppImage runs on older glibc too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+      - name: AppImage tools
+        run: |
+          mkdir -p ../tools
+          curl -fsSL -o ../tools/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          curl -fsSL -o ../tools/runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
+          chmod +x ../tools/appimagetool
+      - name: Build the AppImage
+        run: ./packaging/build-appimage.sh
+      - name: Smoke test
+        run: ./dist/ProjectFCG-x86_64.AppImage --appimage-extract-and-run --self-test
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out="ProjectFCG-${TAG}-linux-x86_64.AppImage"
+          cp dist/ProjectFCG-x86_64.AppImage "$out"
+          gh release upload "$TAG" "$out" --clobber
+
+  windows:
+    name: Windows exe
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked
+      - name: Smoke test
+        shell: bash
+        run: ./target/release/projectfcg.exe --self-test
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out="ProjectFCG-${TAG}-windows-x86_64.exe"
+          cp target/release/projectfcg.exe "$out"
+          gh release upload "$TAG" "$out" --clobber
+
+  macos:
+    name: macOS dmg
+    needs: test
+    runs-on: macos-14
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (Apple Silicon and Intel)
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+      - name: Make the app bundle
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          app=dmg/ProjectFCG.app
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          # one universal binary for both kinds of Mac
+          lipo -create -output "$app/Contents/MacOS/ProjectFCG" \
+            target/aarch64-apple-darwin/release/projectfcg \
+            target/x86_64-apple-darwin/release/projectfcg
+          cp packaging/projectfcg.icns "$app/Contents/Resources/"
+          sed "s/@VERSION@/$version/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
+          # ad-hoc signature: required for Apple Silicon to run it at all
+          # (not a Developer ID, so Gatekeeper still asks on first launch)
+          codesign --force --deep --sign - "$app"
+          ln -s /Applications dmg/Applications
+      - name: Smoke test
+        run: ./dmg/ProjectFCG.app/Contents/MacOS/ProjectFCG --self-test
+      - name: Make the disk image
+        run: hdiutil create -volname ProjectFCG -srcfolder dmg -ov -format UDZO "ProjectFCG-${TAG}-macos-universal.dmg"
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "ProjectFCG-${TAG}-macos-universal.dmg" --clobber
