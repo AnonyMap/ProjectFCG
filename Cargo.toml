@@ -1,0 +1,42 @@
+[package]
+name = "projectfcg"
+version = "0.7.0"
+edition = "2021"
+description = "Gantt-chart project scheduler modelled on Microsoft Project's scheduling engine"
+license = "MIT"
+
+[lib]
+name = "projectfcg"
+path = "src/lib.rs"
+
+[[bin]]
+name = "projectfcg"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+egui = { version = "0.37", default-features = false, features = ["default_fonts", "monochrome_emoji_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "wayland", "x11", "clipboard"] }
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal", "wayland"] }
+roxmltree = "0.20"
+
+# The Windows .exe icon (build.rs); not used on other platforms.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# `cargo build --profile profiling --example profile` for callgrind/perf
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false

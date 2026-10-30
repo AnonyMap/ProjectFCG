@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=ProjectFCG
+GenericName=Project Scheduler
+Comment=Gantt chart project scheduling modelled on Microsoft Project
+Exec=projectfcg %f
+Icon=projectfcg
+Terminal=false
+Categories=Office;ProjectManagement;
+Keywords=gantt;project;schedule;critical path;
+MimeType=application/x-projectfcg-project;
+StartupWMClass=io.github.projectfcg
