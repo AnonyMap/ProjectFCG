@@ -1896,7 +1896,7 @@ fn flow_chart(app: &ProjectFcgApp, p: &egui::Painter, r: Rect, sprint: Option<u3
         return;
     };
     p.text(r.right_top(), Align2::RIGHT_TOP, "tickets", FontId::proportional(small_size()), th.text_dim);
-    let plot = Rect::from_min_max(r.min + vec2(34.0, 30.0), r.max - vec2(6.0, 22.0));
+    let plot = Rect::from_min_max(r.min + vec2(34.0, 30.0), r.max - vec2(6.0, 36.0));
     let n = cf.days.len();
     let ncol = cf.columns.len();
     let total = cf.counts.iter().flatten().map(|c| c.iter().sum::<usize>()).max().unwrap_or(0);
@@ -1988,7 +1988,7 @@ fn burndown_chart(app: &ProjectFcgApp, p: &egui::Painter, r: Rect, sprint: Optio
         return;
     };
     p.text(r.right_top(), Align2::RIGHT_TOP, format!("remaining {}", if est == Estimate::StoryPoints { "points" } else { "tickets" }), FontId::proportional(small_size()), th.text_dim);
-    let plot = Rect::from_min_max(r.min + vec2(34.0, 30.0), r.max - vec2(6.0, 22.0));
+    let plot = Rect::from_min_max(r.min + vec2(34.0, 30.0), r.max - vec2(6.0, 36.0));
     let ymax = axis_max(b.total);
     let n = b.days.len();
     let x = |k: usize| plot.left() + plot.width() * k as f32 / n.max(1) as f32;

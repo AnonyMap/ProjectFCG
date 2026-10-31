@@ -478,10 +478,13 @@ impl ProjectFcgApp {
         if self.group != filters::GroupBy::None {
             // grouped: tasks without their outline, under group headers
             let cx = filters::GroupCtx::new(p, self.group);
-            let mut keyed: Vec<((i64, String), usize)> = (0..p.tasks.len())
-                // summaries roll up their own subtasks, so they're listed only
-                // when a filter asks for them (Summary Tasks, a custom one)
-                .filter(|&i| (!p.tasks[i].calc.is_summary || self.filter != Filter::AllTasks) && eval.matches(i))
+            // summaries roll up their own subtasks, so they're listed only when
+            // the filter picks nothing else (Summary Tasks, say)
+            let matching: Vec<usize> = (0..p.tasks.len()).filter(|&i| eval.matches(i)).collect();
+            let any_leaf = matching.iter().any(|&i| !p.tasks[i].calc.is_summary);
+            let mut keyed: Vec<((i64, String), usize)> = matching
+                .into_iter()
+                .filter(|&i| !any_leaf || !p.tasks[i].calc.is_summary)
                 .map(|i| (filters::group_key(p, i, self.group, &cx), i))
                 .collect();
             // stable: tasks keep their ID order inside a group
@@ -2043,7 +2046,7 @@ impl ProjectFcgApp {
             }
             if self.filter != Filter::AllTasks {
                 ui.separator();
-                ui.label(egui::RichText::new(format!("Filter Applied: {}", self.filter.label())).size(12.0));
+                ui.label(egui::RichText::new(format!("Filter Applied: {}", self.filter_label(self.filter))).size(12.0));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let ctx2 = ui.ctx().clone();

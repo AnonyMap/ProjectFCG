@@ -271,6 +271,27 @@ pub fn agile_release_at(now: chrono::NaiveDateTime) -> Project {
     for t in p.tickets.iter_mut() {
         t.created = Some(start.and_hms_opt(9, 0, 0).unwrap());
     }
+    // how each ticket moved across the board (the cumulative flow chart):
+    // into the next column a working day or so apart, ending where it is
+    let done_col = p.board.done_column();
+    for k in 0..p.tickets.len() {
+        let t = &p.tickets[k];
+        let Some(row) = t.sprint.and_then(|s| p.index_of_uid(s)) else { continue };
+        let ss = p.tasks[row].calc.start.unwrap();
+        let col = t.column;
+        if col == 0 {
+            continue;
+        }
+        let end = if col >= done_col { t.done_at.unwrap_or(now) } else { now - D::hours(3) };
+        let span = p.calendar.work_between(ss, end).max(60);
+        let mut hist = vec![];
+        for c in 1..=col {
+            let frac = c as f64 / (col as f64 + 0.5) * (0.6 + 0.1 * (k % 4) as f64);
+            let at = if c == col && col >= done_col { end } else { p.calendar.add_work(ss, (span as f64 * frac) as i64) };
+            hist.push((at.min(end), c));
+        }
+        p.tickets[k].history = hist;
+    }
     p.tickets[0].description = "As a new user I can create an account with my email address and a password.".into();
     // Jira-style structure: keys, epics, types, priorities, labels, links
     p.board.key_prefix = "APP".into();

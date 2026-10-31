@@ -1,7 +1,7 @@
 # ProjectFCG
 
 A Gantt-chart project scheduler for Linux, written in Rust, whose scheduling
-engine follows Microsoft Project's rules. Version 0.7.0 covers **core
+engine follows Microsoft Project's rules. Version 0.8.0 covers **core
 scheduling** (0.1), **Gantt formatting, critical path analysis, baselines and
 adjustable text size** (0.2), **resources, assignments, costs and leveling**
 (0.3), **themes with dark mode** plus a performance pass (0.4), a
@@ -9,7 +9,9 @@ adjustable text size** (0.2), **resources, assignments, costs and leveling**
 **tracking with earned value, Jira-style epics and issue links, Jira CSV and
 Microsoft Project XML import/export** (0.6), and **dependencies between the
 board and the schedule, Jira's sprint lifecycle, swimlanes and WIP limits,
-recurring and inactive tasks** (0.7).
+recurring and inactive tasks** (0.7), and **Group By and custom filters,
+releases tied to the schedule, cumulative flow, slippage bars and Copy
+Picture** (0.8).
 
 *FCG* = Fast, Cheap, Good: pick two.
 
@@ -21,6 +23,15 @@ recurring and inactive tasks** (0.7).
 > add the new one.
 
 ![ProjectFCG: Detail Gantt with Task Path (driving predecessors in orange) and the Task Inspector](docs/screenshot.png)
+
+| | |
+|---|---|
+| ![The board: issue types, epics, releases, burndown and velocity](docs/board.png) | ![Releases with progress and projected dates, and the cumulative flow chart](docs/releases.png) |
+| The Board: a sprint's tickets, the backlog, burndown and velocity | Releases (fix versions) and the cumulative flow chart |
+| ![Tasks grouped by resource under a custom filter](docs/grouping.png) | ![Tracking Gantt: baselines, slippage and a progress line](docs/tracking.png) |
+| Group by Resource, with a custom filter | Tracking Gantt: baselines, slippage, a progress line at the status date |
+| ![Resource Usage with an overallocation in red](docs/usage.png) | ![The dark theme](docs/dark.png) |
+| Resource Usage: hours per day, overallocations in red | Dark mode (follows the desktop, or View ▸ Theme) |
 
 ## Running on Bazzite
 
@@ -191,7 +202,7 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 
 **Epics, issue types and links** (Jira's model, on the Board)
 
-![The Board in 0.6: issue-type badges, keys, priorities, epic and label chips, sub-tasks, burndown and velocity](docs/board.png)
+![The Board: issue-type badges, keys, priorities, epic, release and label chips, sub-tasks, burndown and velocity](docs/board.png)
 
 * **Issue types**: Story, Task, Bug, Epic, Sub-task, with a coloured badge on each card. **Priority** (Highest…Lowest, Jira's chevrons), **labels**, and ticket **keys** ("APP-12") with a prefix per project.
 * **Epics** group stories across sprints. The panel on the left has a second tab, **Epics**, listing each with a progress bar. Click one to show only its tickets, or drag a card onto it to add the card. **An epic can drive a Gantt task**: pick "Drives task" in the epic, and that task's % complete follows the epic's stories, the way a sprint follows its tickets. The plan shows feature progress without anyone typing a percentage.
@@ -244,7 +255,38 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 * **Recurring tasks** (Task ▸ Insert ▸ Recurring…): daily, weekly on chosen days, monthly or yearly, every N, ending after N occurrences or by a date. Like Project, the series is a summary whose occurrences are subtasks held at their dates. Task Information on the series edits the pattern.
 * **Inactive tasks** (Task ▸ Inactivate, or right-click): for what-if planning. An inactive task stays in the plan, struck through with a hollow bar. It doesn't move its successors, doesn't roll into its summary's dates, work or cost, and books no resource time. Saved to and read from Project XML (`Active`).
 
-![A task waiting on an epic: dashed links from Sprints 3 and 4](docs/board-deps.png)
+![A task waiting on an epic: dashed links from Sprints 3 and 4; the Release milestone carries its release's flag](docs/board-deps.png)
+
+### New in 0.8: groups, filters, releases
+
+**Group By and filters** (View ▸ Data, as in Project)
+
+* **Group by** Complete and Incomplete, Constraint Type, Critical, Duration, Milestones, Priority, Resource, Status or Active v. Inactive, or **by any field** (dates group by week). Each group gets a header row with its tasks' dates, duration, work, cost and % complete, and a summary bar on the Gantt. Click a header to collapse it. Grouping combines with any filter.
+* **Custom filters** (Filter ▸ New Filter…): conditions on any field (*equals, is greater than, is within, contains* …) joined by And/Or, with *Show related summary rows*. Fields are compared by type: durations as durations ("is greater than 3w"), dates by day, money and % as numbers. Saved in the project file, undoable, and also usable as highlights.
+* **Date Range…** (tasks under way between two days) and **Using Resource…** filters.
+* On a 5,000-task plan a custom filter costs about 1 ms per redraw, and grouping on top of it about 3 ms.
+
+**Releases (Jira's fix versions), tied to the schedule**
+
+* Board ▸ **New Release**, or the **Releases** tab next to Backlog and Epics. Drop a card on a release to put it in, or pick one in the ticket dialog. Filter the board by release.
+* Each release shows its progress and a **projected date**: the end of the latest sprint still holding unfinished stories. It's **At risk** when that's after the release date, and **Unplanned work** while some stories aren't in a sprint.
+* **A release can stand behind a Gantt milestone** (Release ▸ Milestone, or *Add Milestone to Schedule*). The milestone waits on every unfinished story in the release, as a task waiting on an epic does, and the release date becomes its deadline, so the Gantt flags a release that won't make it. Link marketing, docs or deployment tasks to the milestone and they follow the release. The milestone gets a flag in the Indicators column with the release's status.
+* **Release…** marks it released and moves unfinished stories to the next release (or out). Released releases take no new work.
+* Jira CSV import and export carry **Fix Version/s**.
+
+**Board**
+
+* **Cumulative flow** (the Flow tab above the burndown): tickets in each column, day by day, from 0.8 on (each move is recorded). Earlier moves are inferred: To Do until the ticket was done.
+* Over a weekend the sprint that ended on Friday stays the board's current sprint until it's completed or the next one starts, as Jira's active sprint does. (Before, the board jumped to the next sprint at 5 pm on Friday, and the agile sample completed the running sprint if opened at a weekend.)
+
+**Gantt**
+
+* **Slippage** (Format ▸ Slippage): a line from each task's baseline start to its start; red when it's later.
+* **Copy Picture** (Task ▸ Clipboard): saves the view as it looks on screen as a PNG.
+
+**Faster**
+
+* Finding a top-level task's summary used to scan back to the first row, which made anything that walks the outline quadratic on big plans. Custom filters with *Show related summary rows* went from 18 ms to 2 ms per redraw on 5,000 tasks.
 
 ### Keyboard shortcuts (Microsoft Project's)
 Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task Information) · Ctrl+F2 / Ctrl+Shift+F2 (link / unlink) · Alt+Shift+→/← (indent/outdent) · Alt+Shift+↑/↓ (move) · Alt+Shift+− / = / Numpad* (hide / show / show all subtasks) · Ctrl+Shift+M / Ctrl+Alt+Shift+A (manual / auto) · Ctrl+Shift+F5 (scroll to task) · F5 (Go To) · Ctrl+F, Shift+F4 (find / next) · F9, Ctrl+F9 (calculate / auto-calc) · Ctrl+/ and Ctrl+* (zoom) · Alt+Home/End, Alt+←/→, Alt+PgUp/PgDn (timescale) · Ctrl+D (fill down) · Ctrl+Delete (reset field) · Ctrl+Shift+F11 (light/dark) · Ctrl+Z/Y, Ctrl+X/C/V, Ctrl+N/O/S, F12 · Alt+F10 (Assign Resources). The full list is under Help ▸ Keyboard Shortcuts or F1.
@@ -300,21 +342,30 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 47. **Editing a recurring task rebuilds its occurrences**, so changes made to single occurrences are lost (Project warns the same way). An occurrence that falls on a day off moves to the next working day; Project asks.
 48. **An inactive task still has dates**, from its own predecessors, so you can see where it would land. It just has no effect on anything else. Its own cost is shown but not totalled.
 49. **Dragging a card between swimlanes only changes its column.** Assignees and epics are changed in the ticket, by the epic drop target, or from the card's menu, so a drag never reassigns work by accident.
+50. **Grouped views list tasks without their outline, and leave out summary tasks** unless the filter picks nothing but summaries (Summary Tasks, say). A summary rolls up its own subtasks, so listing both double-counts; group totals only add up subtasks. Project can keep the outline inside groups ("Maintain hierarchy"); ProjectFCG doesn't.
+51. **In custom filters "And" binds tighter than "Or"**: *A And B Or C* is *(A And B) Or C*, as in most query languages. Dates compare by day (time of day ignored), numbers as they're shown (so $0.30 equals 0.1 + 0.2), and "NA" matches an empty date. A value that doesn't parse for its field is refused when you save the filter.
+52. **The current filter and group are per session, like the table; the custom filters themselves are saved in the file** (Project keeps both in the .mpp). Opening another file clears the highlight and the collapsed groups, which name the old file's things.
+53. **Date Range shows tasks under way at any time in the range** (start ≤ to, finish ≥ from). Project's Date Range asks for tasks that start or finish in it; a task spanning the whole range would be missed that way.
+54. **One release per story.** Jira allows several fix versions; the import keeps the first and lists the others. Epics and sub-tasks carry no release (an epic's size is its stories', and a sub-task ships with its parent).
+55. **A release's projected date is its milestone's finish when it has one, else the latest sprint end with unfinished stories.** The milestone includes anything else linked before it (QA, app store review), so it's the better forecast. With unplanned stories there's no projection, since nothing says when they'll be done.
+56. **The release date is copied to the milestone's Deadline when you set it** (and taken off when the release moves to another milestone or loses its date, if nobody changed it in between). Editing the deadline on the task doesn't change the release; edit the release.
+57. **The flow chart counts the sprint's current tickets.** Tickets carried out of a sprint when it was completed don't appear in its past days. Recording sprint membership over time would fix that; it's not worth the file size yet.
+58. **Copy Picture saves what's on screen** (Project's "For screen"), not the whole plan at print resolution. Full-plan image and PDF export is still on the roadmap.
 
 ## Not yet implemented (Roadmap)
 
 | Milestone | Scope |
 |---|---|
-| ~~Agile~~ | Board, sprints, backlog, burndown, velocity (0.5); epics, issue types, sub-tasks, links, labels, filters, Jira CSV (0.6); board ↔ Gantt dependencies, sprint lifecycle, columns, WIP limits, swimlanes (0.7). Still open: cumulative flow, releases/versions, Jira REST sync |
+| ~~Agile~~ | Board, sprints, backlog, burndown, velocity (0.5); epics, issue types, sub-tasks, links, labels, filters, Jira CSV (0.6); board ↔ Gantt dependencies, sprint lifecycle, columns, WIP limits, swimlanes (0.7); releases, cumulative flow (0.8). Still open: Jira REST sync, control chart / cycle time |
 | ~~Resources~~ | Done in 0.3. Still open: work contours, overtime, time-phased cost accrual, resource pools, Team Planner, generic/budget resources, leveling that splits tasks |
 | ~~Interop~~ | MSPDI XML import/export done in 0.6. Still open: print/PDF export, `.mpp` reading, task calendars and splits in XML |
-| ~~Tracking~~ | Done in 0.6. Still open: slippage bars, physical % complete, actual work entered per assignment, time-phased actuals |
-| Later | Export chart as image/PDF and printing, drawings, task calendars, Network Diagram, Calendar view, Team Planner, custom fields/formulas, grouping and custom filters, split tasks, schedule-from-finish projects, a high-contrast theme, fast leveling for plans with ALAP tasks |
+| ~~Tracking~~ | Done in 0.6; slippage bars in 0.8. Still open: physical % complete, actual work entered per assignment, time-phased actuals |
+| Later | Full-plan image/PDF export and printing (0.8 saves the screen), drawings, task calendars, Network Diagram, Calendar view, Team Planner, custom fields/formulas, multi-level groups, AutoFilter on column headers, split tasks, schedule-from-finish projects, a high-contrast theme, fast leveling for plans with ALAP tasks |
 
 ## Building from source
 
 ```sh
-cargo test                          # 285 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, invariants, UI (headless)
+cargo test                          # 315 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, invariants, UI (headless)
 cargo test --release --test perf -- --ignored --nocapture   # timings on 500–5,000-task projects
 cargo run --release -- --sample
 ./packaging/build-appimage.sh       # → dist/ProjectFCG-x86_64.AppImage
@@ -368,14 +419,18 @@ Double-clicking a `.pfcg` file doesn't open it there yet; use File ▸ Open.
 * `tests/scheduling.rs`: 46 behaviour tests whose expected dates were derived by hand from Project's rules (Standard calendar, project start Mon 1/5/2026). They cover all link types, lags and leads, constraints and conflicts, ALAP, deadlines, holidays, elapsed time, manual tasks, summaries, slack, editing operations, undo, file round-trip, and a 2,000-task performance check.
 * `tests/analysis.rs`: 12 tests for start drivers, multiple critical paths, start/finish slack, Task Path sets (including through summary links), Status/Late rollups, baselines, and loading 0.1.0 files.
 * `tests/resources.rs`: 23 tests for task types, effort-driven, Resource Names notation, resource calendars, costs, overallocation, usage, leveling (order, priority, within-slack, chains, selection), file round-trip, and 300 tasks leveled in under a second.
-* `tests/board.rs`: 14 tests: starting and completing sprints (commitment, carry-over with sub-tasks, frozen velocity, reopening), editing columns (remapping, Done follows the last column); new sprints, ticket moves and ordering, done stamping, progress by points and by count, unestimated fallback, unmarking and deleting sprints, burndown, velocity and its average, assignees booking no work, file round-trip and loading 0.4 files, and the agile sample pinned to a fixed date.
+* `tests/views.rs`: 14 tests: custom filters comparing durations, dates, money and text by type, And/Or precedence, Within, related summary rows, Date Range and Using Resource, Group By (built-in and by field, rollups, collapsing, with filters), saving, undo and validation, and the 0.8 review's findings.
+* `tests/releases.rs`: 10 tests: progress, projection and risk as stories move between sprints, what can carry a release, a milestone following its release (and the tasks linked to it), loops reported, releasing with carry-over, repairing files, Fix Version/s in Jira CSV, and the 0.8 review's findings.
+* `tests/board.rs`: 17 tests (including the sample's current sprint on every day of the week, and cumulative flow from recorded moves): starting and completing sprints (commitment, carry-over with sub-tasks, frozen velocity, reopening), editing columns (remapping, Done follows the last column); new sprints, ticket moves and ordering, done stamping, progress by points and by count, unestimated fallback, unmarking and deleting sprints, burndown, velocity and its average, assignees booking no work, file round-trip and loading 0.4 files, and the agile sample pinned to a fixed date.
 * `tests/tracking.rs`: 13 tests: % complete stamping actuals, an actual start pinning the task, actual finish, actual/remaining duration, Update Project through a date, Mark on Track at the status date, earned value worked by hand and rolled up, the three accrual rules, baselines 0–10, leveling leaving started tasks alone, progress-line points, and saving tracking data while loading 0.5 baselines.
 * `tests/epics.rs`: 14 tests: 60 seeded random sequences of board operations (add, move, retype, re-parent, link, unlink, delete, epic→task), checking after every step that the hierarchy rules hold and that undo/redo is exact, then a Jira export → import of the result; repairing hand-edited boards on load; epics outside sprints and their progress, sub-tasks following their parent and counting nothing, cascading deletes, links in both directions with cycle and duplicate checks, an epic driving a Gantt task, keys, and Jira CSV import (a realistic export with repeated Labels/Sprint columns, links and sub-tasks), sprint creation in natural order, renumbering on clashes, and a full export → import round trip.
 * `tests/mspdi.rs`: 10 tests: 4,500 randomly damaged XML files (bad numbers, dates, durations, truncation) and 200 damaged Jira CSVs, none of which may panic; a rich plan (all resource types, % and elapsed lags, manual task, baselines 0 and 3, progress, resource vacation) round-trips with identical dates, costs and assignments, and the second trip is byte-identical; units as Project writes them; **every element's order checked against the schema's sequences**; a Project-style file with the project summary task, yearly and "last Monday" recurring holidays, a cross-project link, a midnight shift and placeholder rows; and files written by a second MSPDI writer (MPXJ 16) from our samples.
 * `tests/dependencies.rs`: 12 tests: a task following its story's sprint (and moving with it), released at the done time, unplanned stories reported, epics, keys in the Predecessors text, loops refused or reported, stories waiting on tasks and planning conflicts, blockers planned later, deletes, files and undo, leveling, and the 0.7 review's findings.
 * `tests/recurring.rs`: 5 tests: weekly series on chosen days, editing in place (links and extra tasks survive), holidays, month-end and yearly dates, daily series over weekends, refusals, files, undo and XML.
 * `tests/inactive.rs`: 3 tests: no effect on successors, rollups, totals, resources or leveling; whole inactive phases; files and XML.
-* `tests/ui.rs`: 73 end-to-end tests that drive the real app through egui's input pipeline (keystrokes, typing, clicks, double-clicks, bar and card drags) without a window. They include theme switching; every tab, view and dialog drawn in every theme; tracking tables and dialogs; real mouse drags of cards between columns, into and out of the backlog, onto an epic, and to a precise position; the filter bar; the ticket dialog with sub-tasks and links in one undo step; the Jira import dialog and export; Save as XML and opening XML; and a check that every symbol in the UI exists in the bundled fonts.
+* `tests/ui.rs`: 76 end-to-end tests (new in 0.8: the Releases panel by mouse, collapsing group headers, Copy Picture's PNG) that drive the real app through egui's input pipeline (keystrokes, typing, clicks, double-clicks, bar and card drags) without a window. They include theme switching; every tab, view and dialog drawn in every theme; tracking tables and dialogs; real mouse drags of cards between columns, into and out of the backlog, onto an epic, and to a precise position; the filter bar; the ticket dialog with sub-tasks and links in one undo step; the Jira import dialog and export; Save as XML and opening XML; and a check that every symbol in the UI exists in the bundled fonts.
+* A third independent review, of the 0.8 code, found 11 problems, among them: undoing a filter's deletion applied a different filter, Shift+arrow selected the wrong tasks in a grouped view, a release's old milestone kept its deadline, and the flow chart was empty for imported tickets. All are fixed and pinned by `review_*` tests in `tests/views.rs` and `tests/releases.rs`.
+* Rendering the README screenshots turned up four more: the burndown's legend overlapped its axis, the status bar named a custom filter "Custom Filter", grouped views listed summary tasks under any filter, and over a weekend the flow chart never showed where tickets were.
 * A second independent review, of the 0.7 scheduler, board and recurring/inactive code, found 18 more. Among them: typing a key followed by non-ASCII text could crash, a sprint could be held up by its own finished story, leveling miscounted inactive tasks and board loops, and editing a recurring task dropped links to its occurrences. All are fixed and pinned by `review_regressions_0_7_*` tests and the randomized leveler check.
 * An independent review pass of the 0.6 import/export and board code found eight bugs (among them: Add Sub-task from a card failed, negated Jira statuses like "Not Done" landed in Done, derived MSPDI calendars lost to their base's exceptions, a sprint kept its % after its tickets left). All are fixed and pinned by `review_regressions_*` tests. The randomized board test caught a ninth (an epic could be retyped with itself as parent).
 * The AppImage was also exercised by hand under X11 (Xvfb + xdotool) and Wayland (headless Weston).
@@ -389,7 +444,9 @@ src/model.rs      tasks, links, constraints, project, date parsing
 src/schedule.rs   CPM scheduler (forward/backward pass, slack, rollups, start drivers, status)
 src/resources.rs  resources, assignments, task-type rules, costs, overallocation, usage
 src/leveling.rs   resource leveling (dependency-ordered, lazy forward pass)
-src/board.rs      Kanban tickets, issue types, epics, sub-tasks, links, sprints, progress, burndown, velocity
+src/board.rs      Kanban tickets, issue types, epics, sub-tasks, links, sprints, progress, burndown, velocity, cumulative flow
+src/releases.rs   releases (fix versions): progress, projection, milestones
+src/views.rs      custom filter definitions (saved in the file)
 src/recurring.rs  recurring task patterns and occurrences
 src/tracking.rs   actuals, Update Project, Mark on Track, earned value
 src/jira.rs       Jira CSV import/export (CSV parser, field mapping)
@@ -401,8 +458,9 @@ src/history.rs    undo/redo
 src/io.rs         .pfcg JSON and CSV export
 src/app/          egui front end (ribbon, table, gantt, bars, timeline, inspector, dialogs,
                   resource sheet, usage views, resource dialogs, themes, system theme detection,
-                  board view, tracking and import dialogs)
+                  board view, tracking and import dialogs, filters and groups, release dialogs)
 examples/xmldump.rs  writes the samples as MS Project XML (for checking with other tools)
+examples/screens.rs  renders the README screenshots (`xvfb-run cargo run --release --example screens -- docs board`)
 examples/profile.rs  profiling driver (callgrind: `cargo build --profile profiling --example profile`)
 packaging/        icons (.png/.svg/.ico/.icns), desktop entry, AppRun, AppImage build script, macOS Info.plist
 .github/workflows/release.yml  builds the AppImage, .exe and .dmg for each GitHub release

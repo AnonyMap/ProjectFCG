@@ -1053,16 +1053,20 @@ impl Project {
         let b = self.burndown(sprint_uid, now)?;
         let mine: Vec<&Ticket> = self.tickets.iter().filter(|k| k.sprint == Some(sprint_uid) && k.kind.is_standard()).collect();
         let ncol = self.board.columns.len();
+        // the latest working day so far shows where tickets are now (over a
+        // weekend that's Friday)
+        let latest = b.days.iter().rposition(|d| d.and_hms_opt(0, 0, 0).unwrap() <= now);
         let counts = b
             .days
             .iter()
-            .map(|d| {
+            .enumerate()
+            .map(|(k, d)| {
                 let start = d.and_hms_opt(0, 0, 0).unwrap();
                 if now < start {
                     return None;
                 }
                 let end = d.succ_opt().unwrap_or(*d).and_hms_opt(0, 0, 0).unwrap();
-                let at = if now < end { now } else { end - chrono::Duration::seconds(1) };
+                let at = if now < end || Some(k) == latest { now } else { end - chrono::Duration::seconds(1) };
                 let mut c = vec![0; ncol];
                 for t in &mine {
                     if let Some(k) = self.column_at(t, at, now) {
