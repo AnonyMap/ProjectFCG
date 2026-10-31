@@ -12,6 +12,12 @@ pub enum Filter {
     Completed,
     Late,
     Slipping,
+    /// Tasks under way at any time between two days (inclusive).
+    DateRange(chrono::NaiveDate, chrono::NaiveDate),
+    /// Tasks a resource (uid) is assigned to.
+    UsingResource(u32),
+    /// A custom filter saved in the project (index into `views.filters`).
+    Custom(usize),
 }
 
 impl Filter {
@@ -35,6 +41,9 @@ impl Filter {
             Filter::Completed => "Completed Tasks",
             Filter::Late => "Late Tasks",
             Filter::Slipping => "Slipping Tasks",
+            Filter::DateRange(..) => "Date Range",
+            Filter::UsingResource(_) => "Using Resource",
+            Filter::Custom(_) => "Custom Filter",
         }
     }
 }
@@ -199,12 +208,24 @@ pub enum Command {
     ToggleOutlineNumber,
     ToggleBarText,
     ToggleLate,
+    ToggleSlippage,
+    /// Task ▸ Copy Picture: save the view as a PNG.
+    CopyPicture,
     ToggleBaselineBars,
     SetGanttView(crate::format::GanttViewKind),
     ToggleMultipleCriticalPaths,
     TaskPath(super::bars::PathRole),
     ClearTaskPath,
     SetHighlight(Filter),
+    SetGroup(super::filters::GroupBy),
+    ToggleRelatedSummaries,
+    /// Collapse or expand a Group By header (index into the group rows).
+    ToggleGroupRow(usize),
+    DateRangeFilterDlg,
+    UsingResourceFilterDlg,
+    NewFilter,
+    EditFilter(usize),
+    CustomGroupDlg,
     ToggleInspector,
     SetBaseline,
     ClearBaseline,

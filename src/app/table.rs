@@ -73,7 +73,7 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
     let row_ref_of = |d: usize, app: &ProjectFcgApp| -> Option<RowRef> {
         match rows.get(d) {
             Some(DisplayRow::Task(i)) => Some(RowRef::Task(app.project.tasks[*i].uid)),
-            Some(DisplayRow::ProjectSummary) => None,
+            Some(DisplayRow::ProjectSummary) | Some(DisplayRow::Group(_)) => None,
             None => Some(RowRef::Blank),
         }
     };
@@ -86,6 +86,14 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
                 app.edit = None;
                 let ctx = ui.ctx().clone();
                 app.execute(Command::TaskInfo, &ctx);
+            }
+        }
+    } else if body_resp.clicked() && matches!(body_resp.interact_pointer_pos().map(|p| rows.get(hit(p).0)), Some(Some(DisplayRow::Group(_)))) {
+        // a group header: collapse or expand it
+        if let Some(Some(DisplayRow::Group(g))) = body_resp.interact_pointer_pos().map(|p| rows.get(hit(p).0)) {
+            if app.commit_edit() {
+                let ctx = ui.ctx().clone();
+                app.execute(Command::ToggleGroupRow(*g), &ctx);
             }
         }
     } else if body_resp.clicked() || body_resp.secondary_clicked() {
@@ -191,6 +199,9 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
             }
             _ => (None, false),
         };
+        if let Some(DisplayRow::Group(_)) = disp {
+            body_painter.rect_filled(row_rect, 0.0, pal().tint);
+        }
         if is_sel {
             body_painter.rect_filled(row_rect, 0.0, pal().selected_row);
         } else if let Some(DisplayRow::Task(i)) = disp {
@@ -259,6 +270,18 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
                 for (k, c) in app.columns.iter().enumerate() {
                     let cell = Rect::from_min_max(pos2(lay.col_x[k], y), pos2(lay.col_x[k + 1], y + row_h()));
                     paint_project_summary_cell(app, &cell_painter, cell, c.id, &font);
+                }
+            }
+            Some(DisplayRow::Group(g)) => {
+                let groups = app.groups.borrow();
+                if let Some(gr) = groups.get(g) {
+                    for (k, c) in app.columns.iter().enumerate() {
+                        let cell = Rect::from_min_max(pos2(lay.col_x[k], y), pos2(lay.col_x[k + 1], y + row_h()));
+                        if cell.right() < cells_clip.left() || cell.left() > cells_clip.right() {
+                            continue;
+                        }
+                        paint_group_cell(app, &cell_painter, cell, gr, c.id, &font);
+                    }
                 }
             }
             None => {}
@@ -434,6 +457,24 @@ fn paint_cell(app: &ProjectFcgApp, p: &Painter, cell: Rect, i: usize, col: Colum
                 tips.push(tip);
                 x += 13.0;
             }
+            if let Some(rel) = proj.release_of_task(t.uid) {
+                let st = proj.release_stats(rel.id);
+                let c = super::board::release_status_color(st.status);
+                // a flag on a pole
+                let o = pos2(x + 2.0, cy);
+                clip.line_segment([o + vec2(0.0, -5.5), o + vec2(0.0, 5.5)], Stroke::new(1.3, pal().glyph));
+                clip.add(egui::Shape::convex_polygon(vec![o + vec2(0.5, -5.5), o + vec2(8.0, -3.0), o + vec2(0.5, -0.5)], c, Stroke::NONE));
+                let mut tip = format!("Release {}: {}", rel.name, st.status.label());
+                if st.tickets > 0 {
+                    tip += &format!(" · {} of {} done", crate::duration::fmt_num(st.done), proj.board.estimate.unit(st.total));
+                }
+                if let Some(pj) = st.projected {
+                    tip += &format!(" · projected {}", crate::model::fmt_date(pj));
+                }
+                tip += ". This milestone waits on the release's unfinished stories.";
+                tips.push(tip);
+                x += 13.0;
+            }
             if !t.notes.is_empty() {
                 icon_note(&clip, pos2(x + 5.0, cy));
                 tips.push(format!("Notes: '{}'", t.notes.lines().next().unwrap_or("")));
@@ -457,7 +498,8 @@ fn paint_cell(app: &ProjectFcgApp, p: &Painter, cell: Rect, i: usize, col: Colum
             .filter(|_| false)
         }
         ColumnId::Name => {
-            let lvl = t.outline_level as f32;
+            // grouped views list tasks without their outline, under the group
+            let lvl = if app.group != super::filters::GroupBy::None { 2.0 } else { t.outline_level as f32 };
             let mut x = cell.left() + 4.0 + (lvl - 1.0) * indent_px();
             if app.view.outline_number {
                 clip.text(pos2(x, cell.center().y), Align2::LEFT_CENTER, &t.calc.outline_number, font.clone(), pal().text_dim);
@@ -551,6 +593,50 @@ fn paint_project_summary_cell(app: &ProjectFcgApp, p: &Painter, cell: Rect, col:
         _ => (pos2(cell.left() + 4.0, cell.center().y), Align2::LEFT_CENTER),
     };
     paint_bold(&clip, pos, anchor, &text, font, pal().text);
+}
+
+/// A Group By header row: the group's name and its rollup.
+fn paint_group_cell(app: &ProjectFcgApp, p: &Painter, cell: Rect, g: &super::filters::GroupRow, col: ColumnId, font: &FontId) {
+    let proj = &app.project;
+    let clip = p.with_clip_rect(cell.intersect(p.clip_rect()));
+    let df = proj.format.layout.date_format;
+    let opt = |d: Option<chrono::NaiveDateTime>| d.map(|d| df.format(d)).unwrap_or_default();
+    let text = match col {
+        ColumnId::Name => {
+            let c = pos2(cell.left() + 9.0, cell.center().y);
+            let pts = if g.collapsed {
+                vec![c + vec2(-2.5, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.5, 4.0)]
+            } else {
+                vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)]
+            };
+            clip.add(egui::Shape::convex_polygon(pts, pal().glyph, Stroke::NONE));
+            let r = paint_bold_rect(&clip, pos2(cell.left() + 18.0, cell.center().y), &g.label, font, pal().text);
+            let n = if g.count == 1 { "1 task".to_string() } else { format!("{} tasks", g.count) };
+            clip.text(pos2(r.right() + 8.0, cell.center().y), Align2::LEFT_CENTER, n, FontId::proportional(small_size()), pal().text_dim);
+            return;
+        }
+        ColumnId::Duration => match (g.start, g.finish) {
+            (Some(s), Some(f)) => proj.format_duration_minutes(proj.calendar.work_between(s, f), crate::duration::DurUnit::Day),
+            _ => String::new(),
+        },
+        ColumnId::Start | ColumnId::EarlyStart => opt(g.start),
+        ColumnId::Finish | ColumnId::EarlyFinish => opt(g.finish),
+        ColumnId::Work => proj.format_duration_minutes(g.work, crate::duration::DurUnit::Hour),
+        ColumnId::Cost => crate::resources::fmt_money(g.cost, &proj.settings.currency_symbol),
+        ColumnId::PercentComplete => format!("{}%", g.percent_complete.round()),
+        _ => String::new(),
+    };
+    let (pos, anchor) = match col.align() {
+        Align::RIGHT => (pos2(cell.right() - 5.0, cell.center().y), Align2::RIGHT_CENTER),
+        _ => (pos2(cell.left() + 4.0, cell.center().y), Align2::LEFT_CENTER),
+    };
+    paint_bold(&clip, pos, anchor, &text, font, pal().text);
+}
+
+fn paint_bold_rect(p: &Painter, pos: Pos2, text: &str, font: &FontId, color: Color32) -> Rect {
+    paint_bold(p, pos, Align2::LEFT_CENTER, text, font, color);
+    let g = p.layout_no_wrap(text.to_string(), font.clone(), color);
+    Rect::from_min_size(pos2(pos.x, pos.y - g.size().y / 2.0), g.size() + vec2(1.0, 0.0))
 }
 
 fn paint_header(app: &mut ProjectFcgApp, ui: &mut egui::Ui, painter: &Painter, rect: Rect, lay: &Layout) {

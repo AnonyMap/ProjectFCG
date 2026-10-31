@@ -153,6 +153,12 @@ pub struct Dialogs {
     pub sprint: Option<super::sprint_dialogs::SprintDlg>,
     pub columns: Option<super::sprint_dialogs::ColumnsDlg>,
     pub recurring: Option<super::sprint_dialogs::RecurringDlg>,
+    pub date_range: Option<super::view_dialogs::DateRangeDlg>,
+    pub using_resource: Option<super::view_dialogs::UsingResourceDlg>,
+    pub filter_def: Option<super::view_dialogs::FilterDefDlg>,
+    pub custom_group: Option<super::view_dialogs::CustomGroupDlg>,
+    pub release: Option<super::release_dialogs::ReleaseDlg>,
+    pub release_version: Option<super::release_dialogs::ReleaseVersionDlg>,
 }
 
 impl Dialogs {
@@ -182,6 +188,12 @@ impl Dialogs {
             || self.sprint.is_some()
             || self.columns.is_some()
             || self.recurring.is_some()
+            || self.date_range.is_some()
+            || self.using_resource.is_some()
+            || self.filter_def.is_some()
+            || self.custom_group.is_some()
+            || self.release.is_some()
+            || self.release_version.is_some()
             || self.update_tasks.is_some()
             || self.update_project.is_some()
             || self.statistics

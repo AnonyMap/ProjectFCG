@@ -24,6 +24,7 @@ pub enum SidePanel {
     #[default]
     Backlog,
     Epics,
+    Releases,
 }
 
 /// Jira's swimlanes: rows across the columns.
@@ -59,6 +60,8 @@ pub enum EpicFilter {
 pub struct BoardFilter {
     pub text: String,
     pub epic: EpicFilter,
+    /// `Some(None)` = in no release.
+    pub release: Option<Option<u32>>,
     pub kind: Option<IssueType>,
     pub label: Option<String>,
     /// `Some(None)` = unassigned.
@@ -86,6 +89,13 @@ impl BoardFilter {
         }
         if self.kind.is_some_and(|k| k != t.kind) {
             return false;
+        }
+        if let Some(r) = self.release {
+            // sub-tasks show with their parent's release
+            let rel = if t.kind == IssueType::Subtask { t.parent.and_then(|x| p.ticket(x)).and_then(|x| x.release) } else { t.release };
+            if rel != r {
+                return false;
+            }
         }
         if self.label.as_ref().is_some_and(|l| !t.labels.iter().any(|x| x.eq_ignore_ascii_case(l))) {
             return false;
@@ -116,6 +126,8 @@ pub struct BoardState {
     pub selected: Option<u32>,
     pub drag: Option<Drag>,
     pub show_charts: bool,
+    /// Top chart: cumulative flow instead of the burndown.
+    pub flow: bool,
     pub backlog_open: bool,
     pub side: SidePanel,
     pub filter: BoardFilter,
@@ -123,9 +135,11 @@ pub struct BoardState {
     pub quick_add: String,
     pub quick_backlog: String,
     pub quick_epic: String,
+    pub quick_release: String,
     pub scroll_y: f32,
     pub backlog_scroll: f32,
     pub epics_scroll: f32,
+    pub releases_scroll: f32,
     /// Where each card was drawn last frame (hit-testing, tests).
     pub card_rects: Vec<(u32, Rect)>,
     /// Column body rects of the sprint board, left to right.
@@ -133,6 +147,8 @@ pub struct BoardState {
     pub backlog_rect: Rect,
     /// Epic rows of the Epics panel (drop targets, tests).
     pub epic_rects: Vec<(u32, Rect)>,
+    /// Release rows of the Releases panel (drop targets, tests).
+    pub release_rects: Vec<(u32, Rect)>,
     /// Focus the filter box next frame (Ctrl+F).
     pub focus_filter: bool,
     /// Ticket id → index into `Project::tickets`, rebuilt each frame (the
@@ -147,6 +163,7 @@ impl Default for BoardState {
             selected: None,
             drag: None,
             show_charts: true,
+            flow: false,
             backlog_open: true,
             side: SidePanel::Backlog,
             filter: BoardFilter::default(),
@@ -154,13 +171,16 @@ impl Default for BoardState {
             quick_add: String::new(),
             quick_backlog: String::new(),
             quick_epic: String::new(),
+            quick_release: String::new(),
             scroll_y: 0.0,
             backlog_scroll: 0.0,
             epics_scroll: 0.0,
+            releases_scroll: 0.0,
             card_rects: vec![],
             column_rects: vec![],
             backlog_rect: Rect::NOTHING,
             epic_rects: vec![],
+            release_rects: vec![],
             focus_filter: false,
             idx: Default::default(),
         }
@@ -179,6 +199,7 @@ enum Target {
     Column(usize),
     Backlog,
     Epic(u32),
+    Release(u32),
 }
 
 /// A link row in the ticket dialog: as seen from this ticket.
@@ -213,6 +234,8 @@ pub struct TicketDlg {
     pub subtask_text: String,
     /// Gantt tasks (uids) it can't start before.
     pub after_tasks: Vec<u32>,
+    /// Release (fix version).
+    pub release: Option<u32>,
     pub error: Option<String>,
 }
 
@@ -331,6 +354,7 @@ impl ProjectFcgApp {
                 new_subtasks: vec![],
                 subtask_text: String::new(),
                 after_tasks: t.after_tasks.clone(),
+                release: t.release,
                 error: None,
             },
             None => {
@@ -358,6 +382,10 @@ impl ProjectFcgApp {
                     new_subtasks: vec![],
                     subtask_text: String::new(),
                     after_tasks: vec![],
+                    release: match self.board.filter.release {
+                        Some(Some(r)) => Some(r),
+                        _ => None,
+                    },
                     error: None,
                 }
             }
@@ -512,10 +540,10 @@ impl ProjectFcgApp {
                 return;
             }
             let list = if c == -1 {
-                if self.board.side == SidePanel::Epics {
-                    self.project.epics().into_iter().map(|k| self.project.tickets[k].id).collect()
-                } else {
-                    self.board_list(None, None)
+                match self.board.side {
+                    SidePanel::Epics => self.project.epics().into_iter().map(|k| self.project.tickets[k].id).collect(),
+                    SidePanel::Releases => vec![],
+                    SidePanel::Backlog => self.board_list(None, None),
                 }
             } else {
                 sprint.map(|s| self.board_list(Some(s), Some(c as usize))).unwrap_or_default()
@@ -643,6 +671,9 @@ fn layout_card(ui: &egui::Ui, p: &Project, idx: &std::collections::HashMap<u32, 
             chips.push(Chip { text: format!("waits: {name}"), fill: chip_fill(pal().warn), dot: Some(pal().warn) });
         }
     }
+    if let Some(r) = t.release.and_then(|r| p.release(r)) {
+        chips.push(Chip { text: format!("⚑ {}", r.name), fill: pal().header_bg, dot: None });
+    }
     for l in &t.labels {
         chips.push(Chip { text: l.clone(), fill: pal().tint, dot: None });
     }
@@ -761,6 +792,9 @@ fn hover_text(p: &Project, t: &Ticket) -> String {
     let waiting: Vec<String> = p.tasks_waiting_on(t.id).into_iter().map(|r| p.tasks[r].name.clone()).collect();
     if !waiting.is_empty() {
         s += &format!("\ntasks waiting on it: {}", waiting.join(", "));
+    }
+    if let Some(r) = t.release.and_then(|r| p.release(r)) {
+        s += &format!("\nrelease: {}", r.name);
     }
     for c in p.dependency_conflicts(t.id) {
         s += &format!("\n⚠ {c}");
@@ -881,6 +915,20 @@ fn card_menu(app: &ProjectFcgApp, ui: &mut egui::Ui, t: &Ticket, actions: &mut V
             }
         });
     }
+    if t.kind.is_standard() && !app.project.board.releases.is_empty() {
+        ui.menu_button("Release", |ui| {
+            if ui.selectable_label(t.release.is_none(), "No release").clicked() {
+                actions.push(Action::SetRelease(id, None));
+                ui.close();
+            }
+            for r in app.project.board.releases.iter().filter(|r| r.released.is_none() || t.release == Some(r.id)) {
+                if ui.selectable_label(t.release == Some(r.id), &r.name).clicked() {
+                    actions.push(Action::SetRelease(id, Some(r.id)));
+                    ui.close();
+                }
+            }
+        });
+    }
     ui.menu_button("Priority", |ui| {
         for pr in Priority::ALL {
             if ui.selectable_label(t.priority == pr, pr.label()).clicked() {
@@ -905,6 +953,9 @@ enum Action {
     AddSubtask(u32),
     SetEpic(u32, Option<u32>),
     SetPriority(u32, Priority),
+    SetRelease(u32, Option<u32>),
+    AddRelease(String),
+    EditRelease(u32),
 }
 
 pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
@@ -913,6 +964,7 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
     app.board.card_rects.clear();
     app.board.column_rects.clear();
     app.board.epic_rects.clear();
+    app.board.release_rects.clear();
     app.board.idx = app.project.tickets.iter().enumerate().map(|(k, t)| (t.id, k)).collect();
     let sprint = app.board_sprint();
     app.board.sprint = sprint;
@@ -922,6 +974,11 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
     if let EpicFilter::Epic(e) = app.board.filter.epic {
         if app.project.ticket(e).is_none_or(|t| t.kind != IssueType::Epic) {
             app.board.filter.epic = EpicFilter::Any;
+        }
+    }
+    if let Some(Some(r)) = app.board.filter.release {
+        if app.project.release(r).is_none() {
+            app.board.filter.release = None;
         }
     }
     let mut actions: Vec<Action> = vec![];
@@ -989,6 +1046,13 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
             Action::SetEpic(id, e) => {
                 app.edit_project(if e.is_some() { "Set Epic" } else { "Remove from Epic" }, |p| p.set_ticket_parent(id, e));
             }
+            Action::SetRelease(id, r) => {
+                app.edit_project(if r.is_some() { "Set Release" } else { "Remove from Release" }, |p| p.set_ticket_release(id, r));
+            }
+            Action::AddRelease(name) => {
+                app.edit_project("New Release", |p| p.add_release(&name, None));
+            }
+            Action::EditRelease(r) => app.open_release_dialog(Some(r)),
             Action::SetPriority(id, pr) => {
                 app.edit_project("Set Priority", |p| {
                     let k = p.ticket_index(id).ok_or("No such ticket.")?;
@@ -1127,6 +1191,20 @@ fn filter_bar(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect) {
                 ui.selectable_value(&mut f.kind, Some(k), k.label());
             }
         });
+        if !p.board.releases.is_empty() || f.release.is_some() {
+            let name = match f.release {
+                None => "All releases".to_string(),
+                Some(None) => "No release".to_string(),
+                Some(Some(r)) => p.release(r).map(|x| x.name.clone()).unwrap_or_default(),
+            };
+            egui::ComboBox::from_id_salt("board_f_release").selected_text(name).width(100.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut f.release, None, "All releases");
+                ui.selectable_value(&mut f.release, Some(None), "No release");
+                for r in &p.board.releases {
+                    ui.selectable_value(&mut f.release, Some(Some(r.id)), &r.name);
+                }
+            });
+        }
         let labels = p.all_labels();
         if !labels.is_empty() || f.label.is_some() {
             egui::ComboBox::from_id_salt("board_f_label").selected_text(f.label.clone().unwrap_or_else(|| "All labels".into())).width(100.0).show_ui(ui, |ui| {
@@ -1184,17 +1262,17 @@ fn side_panel(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect, actions: &mut
     let tr = Rect::from_min_size(pos2(r.right() - 30.0, r.top() + 6.0), vec2(24.0, 24.0));
     let tresp = ui.interact(tr, ui.scope_id().with("backlog_toggle"), Sense::click());
     p.text(tr.center(), Align2::CENTER_CENTER, if app.board.backlog_open { "⏴" } else { "⏵" }, FontId::proportional(14.0), if tresp.hovered() { th.accent } else { th.text_dim });
-    if tresp.on_hover_text(if app.board.backlog_open { "Hide the panel" } else { "Show the backlog and epics" }).clicked() {
+    if tresp.on_hover_text(if app.board.backlog_open { "Hide the panel" } else { "Show the backlog, epics and releases" }).clicked() {
         app.board.backlog_open = !app.board.backlog_open;
     }
     if !app.board.backlog_open {
-        let g = p.layout_no_wrap("BACKLOG · EPICS".into(), FontId::proportional(11.0), th.text_dim);
+        let g = p.layout_no_wrap("BACKLOG · EPICS · RELEASES".into(), FontId::proportional(11.0), th.text_dim);
         p.add(egui::epaint::TextShape::new(pos2(r.center().x - g.size().y / 2.0, r.top() + 50.0 + g.size().x), g, th.text_dim).with_angle(-std::f32::consts::FRAC_PI_2));
         return;
     }
     // tabs
     let mut x = r.left() + 10.0;
-    for (tab, name) in [(SidePanel::Backlog, "Backlog"), (SidePanel::Epics, "Epics")] {
+    for (tab, name) in [(SidePanel::Backlog, "Backlog"), (SidePanel::Epics, "Epics"), (SidePanel::Releases, "Releases")] {
         let on = app.board.side == tab;
         let g = p.layout_no_wrap(name.into(), FontId::proportional(text_size() + 1.0), if on { th.heading } else { th.text_dim });
         let tr = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(g.size().x + 8.0, 26.0));
@@ -1213,6 +1291,7 @@ fn side_panel(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect, actions: &mut
     match app.board.side {
         SidePanel::Backlog => backlog_list(app, ui, r, actions),
         SidePanel::Epics => epics_list(app, ui, r, actions),
+        SidePanel::Releases => releases_list(app, ui, r, actions),
     }
 }
 
@@ -1346,6 +1425,164 @@ fn epics_list(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect, actions: &mut
     let mut s = app.board.epics_scroll;
     panel_scroll(ui, list, &mut s, content);
     app.board.epics_scroll = s;
+}
+
+pub fn release_status_color(s: crate::releases::ReleaseStatus) -> Color32 {
+    use crate::releases::ReleaseStatus as R;
+    match s {
+        R::Released | R::Ready => pal().accent,
+        R::OnTrack => Color32::from_rgb(46, 125, 50),
+        R::AtRisk | R::Unplanned => pal().warn,
+        R::NoStories => pal().text_dim,
+    }
+}
+
+fn releases_list(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect, actions: &mut Vec<Action>) {
+    let th = pal();
+    let p = ui.painter_at(r);
+    let n = app.project.board.releases.len();
+    p.text(
+        pos2(r.left() + 12.0, r.top() + 44.0),
+        Align2::LEFT_CENTER,
+        format!("{} · click to filter, drop a card to add it", if n == 1 { "1 release".to_string() } else { format!("{n} releases") }),
+        FontId::proportional(small_size()),
+        th.text_dim,
+    );
+    let qa = Rect::from_min_size(pos2(r.left() + 10.0, r.top() + 56.0), vec2(r.width() - 20.0, 24.0));
+    let te = ui.put(qa, egui::TextEdit::singleline(&mut app.board.quick_release).hint_text("+ New release (e.g. 1.2)…"));
+    if te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !app.board.quick_release.trim().is_empty() {
+        actions.push(Action::AddRelease(std::mem::take(&mut app.board.quick_release)));
+        te.request_focus();
+    }
+    let list = Rect::from_min_max(pos2(r.left() + 10.0, qa.bottom() + 10.0), pos2(r.right() - 10.0, r.bottom() - 6.0));
+    let lp = ui.painter_at(list.expand2(vec2(4.0, 0.0)));
+    let mut y = list.top() - app.board.releases_scroll;
+    let est = app.project.board.estimate;
+    let dragging = app.board.drag.is_some();
+    let pointer = ui.input(|i| i.pointer.interact_pos());
+    let sf = FontId::proportional(small_size());
+    for rel in app.project.board.releases.clone() {
+        let st = app.project.release_stats(rel.id);
+        let milestone = rel.task.and_then(|u| app.project.task_by_uid(u)).map(|t| t.name.clone());
+        let h = 84.0 + if milestone.is_some() { small_size() + 4.0 } else { 0.0 };
+        let er = Rect::from_min_size(pos2(list.left(), y), vec2(list.width(), h));
+        y += h + 8.0;
+        app.board.release_rects.push((rel.id, er));
+        if er.bottom() < list.top() || er.top() > list.bottom() {
+            continue;
+        }
+        let filtered = app.board.filter.release == Some(Some(rel.id));
+        let hot = dragging && pointer.is_some_and(|pp| er.contains(pp));
+        let sc = release_status_color(st.status);
+        lp.rect_filled(er, 5.0, if hot { chip_fill(th.accent) } else { th.bg });
+        lp.rect_filled(Rect::from_min_max(er.min, pos2(er.left() + 5.0, er.bottom())), egui::CornerRadius { nw: 5, sw: 5, ne: 0, se: 0 }, sc);
+        let (bw, bc) = if filtered { (2.0, th.active_cell) } else { (1.0, th.header_border) };
+        lp.rect_stroke(er, 5.0, Stroke::new(bw, bc), StrokeKind::Inside);
+        let tx = er.left() + 14.0;
+        let released = rel.released.is_some();
+        lp.text(pos2(tx, er.top() + 14.0), Align2::LEFT_CENTER, format!("⚑ {}", rel.name), FontId::proportional(text_size()), if released { th.text_dim } else { th.text });
+        // status chip
+        let g = lp.layout_no_wrap(st.status.label().to_string(), FontId::proportional(small_size() - 1.0), sc);
+        let cr = Rect::from_min_size(pos2(er.right() - 8.0 - g.size().x - 10.0, er.top() + 6.0), g.size() + vec2(10.0, 4.0));
+        lp.rect_filled(cr, 3.0, chip_fill(sc));
+        lp.galley(cr.min + vec2(5.0, 2.0), g, sc);
+        // progress
+        let bar = Rect::from_min_size(pos2(tx, er.top() + 30.0), vec2(er.right() - 8.0 - tx, 7.0));
+        lp.rect_filled(bar, 3.5, th.header_bg);
+        let frac = (st.percent() / 100.0) as f32;
+        if frac > 0.0 {
+            lp.rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())), 3.5, sc);
+        }
+        let prog = if st.tickets == 0 {
+            "No stories yet".to_string()
+        } else {
+            format!("{} of {} done · {:.0}%", crate::duration::fmt_num(st.done), est.unit(st.total), st.percent())
+        };
+        lp.text(pos2(tx, er.top() + 50.0), Align2::LEFT_CENTER, prog, sf.clone(), th.text_dim);
+        let dates = match (rel.released, rel.date, st.projected) {
+            (Some(at), _, _) => format!("Released {}", fmt_date(at)),
+            (None, Some(d), Some(pj)) => format!("Due {} · projected {}", d.format("%-m/%-d/%y"), fmt_date(pj)),
+            (None, Some(d), None) => format!("Due {}", d.format("%-m/%-d/%y")),
+            (None, None, Some(pj)) => format!("Projected {}", fmt_date(pj)),
+            (None, None, None) => "No release date".to_string(),
+        };
+        let dc = if st.status == crate::releases::ReleaseStatus::AtRisk { th.warn } else { th.text_dim };
+        lp.text(pos2(tx, er.top() + 68.0), Align2::LEFT_CENTER, dates, sf.clone(), dc);
+        if let Some(m) = &milestone {
+            lp.text(pos2(tx, er.top() + 68.0 + small_size() + 4.0), Align2::LEFT_CENTER, format!("◆ milestone \"{m}\""), FontId::proportional(small_size() - 1.0), th.heading);
+        }
+        let vis = er.intersect(list);
+        let resp = ui.interact(vis, ui.scope_id().with(("release_row", rel.id)), Sense::click());
+        if resp.clicked() {
+            let f = &mut app.board.filter.release;
+            *f = if *f == Some(Some(rel.id)) { None } else { Some(Some(rel.id)) };
+        }
+        if resp.double_clicked() {
+            actions.push(Action::EditRelease(rel.id));
+        }
+        let mut tip = format!("Release {}", rel.name);
+        if !rel.description.is_empty() {
+            tip += &format!("\n{}", rel.description);
+        }
+        if st.unplanned > 0 {
+            tip += &format!("\n{} unfinished stor{} not planned into a sprint", st.unplanned, if st.unplanned == 1 { "y" } else { "ies" });
+        }
+        if st.unestimated > 0 {
+            tip += &format!("\n{} not estimated", st.unestimated);
+        }
+        tip += "\n\nClick to show only this release's tickets; double-click to edit.";
+        let resp = resp.on_hover_text_at_pointer(tip);
+        resp.context_menu(|ui| {
+            if ui.button("Edit…").clicked() {
+                actions.push(Action::EditRelease(rel.id));
+                ui.close();
+            }
+            if ui.button(if filtered { "Show All Tickets" } else { "Show Only This Release" }).clicked() {
+                app.board.filter.release = if filtered { None } else { Some(Some(rel.id)) };
+                ui.close();
+            }
+            ui.separator();
+            if released {
+                if ui.button("Unrelease").clicked() {
+                    app.edit_project("Unrelease", |p| p.unrelease_version(rel.id));
+                    ui.close();
+                }
+            } else if ui.button("Release…").on_hover_text("Mark it released; unfinished stories move to another release").clicked() {
+                app.open_release_version_dialog(rel.id);
+                ui.close();
+            }
+            match rel.task.and_then(|u| app.project.index_of_uid(u)) {
+                Some(row) => {
+                    if ui.button("Go to Milestone").clicked() {
+                        app.view.main = super::MainView::Gantt;
+                        app.select_index(row);
+                        if let Some(s) = app.project.tasks[row].calc.start {
+                            app.scroll_gantt_to(s);
+                        }
+                        ui.close();
+                    }
+                }
+                None => {
+                    if ui.button("Add Milestone to Schedule").on_hover_text("A milestone that waits on this release's stories, with the release date as its deadline").clicked() {
+                        app.edit_project("Add Release Milestone", |p| p.add_release_milestone(rel.id));
+                        ui.close();
+                    }
+                }
+            }
+            ui.separator();
+            if ui.button("Delete Release").on_hover_text("Its stories stay, without a release").clicked() {
+                app.edit_project("Delete Release", |p| p.delete_release(rel.id));
+                ui.close();
+            }
+        });
+    }
+    if n == 0 {
+        lp.text(list.center_top() + vec2(0.0, 30.0), Align2::CENTER_CENTER, "No releases yet", FontId::proportional(small_size()), th.text_dim);
+    }
+    let content = y + app.board.releases_scroll - list.top();
+    let mut s = app.board.releases_scroll;
+    panel_scroll(ui, list, &mut s, content);
+    app.board.releases_scroll = s;
 }
 
 fn columns(app: &mut ProjectFcgApp, ui: &mut egui::Ui, area: Rect, sprint: u32, actions: &mut Vec<Action>) {
@@ -1511,10 +1748,10 @@ fn drag_and_drop(app: &mut ProjectFcgApp, ui: &mut egui::Ui, sprint: Option<u32>
     let Some(pos) = pos else { return };
     // target place and insertion point
     let target = if app.board.backlog_open && app.board.backlog_rect.contains(pos) {
-        if app.board.side == SidePanel::Epics {
-            app.board.epic_rects.iter().find(|(_, r)| r.contains(pos)).map(|(e, _)| Target::Epic(*e))
-        } else {
-            Some(Target::Backlog)
+        match app.board.side {
+            SidePanel::Epics => app.board.epic_rects.iter().find(|(_, r)| r.contains(pos)).map(|(e, _)| Target::Epic(*e)),
+            SidePanel::Releases => app.board.release_rects.iter().find(|(_, r)| r.contains(pos)).map(|(e, _)| Target::Release(*e)),
+            SidePanel::Backlog => Some(Target::Backlog),
         }
     } else if sprint.is_some() {
         app.board.column_rects.iter().position(|r| r.contains(pos)).map(Target::Column)
@@ -1524,7 +1761,7 @@ fn drag_and_drop(app: &mut ProjectFcgApp, ui: &mut egui::Ui, sprint: Option<u32>
     let list_of = |app: &ProjectFcgApp, tg: Target| match tg {
         Target::Backlog => app.board_list(None, None),
         Target::Column(c) => app.board_list(sprint, Some(c)),
-        Target::Epic(_) => vec![],
+        Target::Epic(_) | Target::Release(_) => vec![],
     };
     let before = target.and_then(|tg| {
         list_of(app, tg)
@@ -1541,6 +1778,11 @@ fn drag_and_drop(app: &mut ProjectFcgApp, ui: &mut egui::Ui, sprint: Option<u32>
     match target {
         Some(Target::Epic(e)) => {
             if let Some((_, r)) = app.board.epic_rects.iter().find(|(x, _)| *x == e) {
+                fg.rect_stroke(*r, 5.0, Stroke::new(2.5, pal().accent), StrokeKind::Outside);
+            }
+        }
+        Some(Target::Release(e)) => {
+            if let Some((_, r)) = app.board.release_rects.iter().find(|(x, _)| *x == e) {
                 fg.rect_stroke(*r, 5.0, Stroke::new(2.5, pal().accent), StrokeKind::Outside);
             }
         }
@@ -1574,6 +1816,16 @@ fn drag_and_drop(app: &mut ProjectFcgApp, ui: &mut egui::Ui, sprint: Option<u32>
             app.board.selected = Some(id);
             return;
         }
+        if let Target::Release(r) = tg {
+            // a sub-task brings its parent
+            let target = if t.kind == IssueType::Subtask { t.parent.unwrap_or(id) } else { id };
+            if app.project.ticket(target).is_some_and(|x| x.release != Some(r)) {
+                let name = app.project.release(r).map(|x| x.name.clone()).unwrap_or_default();
+                app.edit_project(&format!("Add to {name}"), |p| p.set_ticket_release(target, Some(r)));
+            }
+            app.board.selected = Some(id);
+            return;
+        }
         let (s, c, label) = match tg {
             Target::Column(c) => (sprint, c, format!("Move to {}", app.project.board.columns[c])),
             _ => (None, 0, "Move to Backlog".to_string()),
@@ -1597,8 +1849,122 @@ fn charts_panel(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect, sprint: Opt
     let half = (r.height() / 2.0).max(180.0);
     let top = Rect::from_min_size(r.min + vec2(14.0, 10.0), vec2(r.width() - 28.0, half - 20.0));
     let bottom = Rect::from_min_max(pos2(r.left() + 14.0, top.bottom() + 20.0), r.max - vec2(14.0, 10.0));
-    burndown_chart(app, &p, top, sprint);
+    // Burndown | Flow switch
+    let mut x = top.left();
+    for (flow, name) in [(false, "Burndown"), (true, "Flow")] {
+        let on = app.board.flow == flow;
+        let g = p.layout_no_wrap(name.into(), FontId::proportional(text_size() + 1.0), if on { th.heading } else { th.text_dim });
+        let tr = Rect::from_min_size(pos2(x, top.top() - 2.0), vec2(g.size().x + 6.0, g.size().y + 6.0));
+        let resp = ui.interact(tr, ui.scope_id().with(("chart_tab", name)), Sense::click());
+        if on {
+            p.line_segment([pos2(tr.left(), tr.bottom()), pos2(tr.right(), tr.bottom())], Stroke::new(2.0, th.accent));
+        }
+        p.galley(pos2(tr.left() + 3.0, tr.top() + 2.0), g, th.text);
+        let tip = if flow { "Cumulative flow: tickets in each column, day by day" } else { "Remaining work against the ideal line" };
+        if resp.on_hover_text(tip).clicked() {
+            app.board.flow = flow;
+        }
+        x = tr.right() + 12.0;
+    }
+    if app.board.flow {
+        flow_chart(app, &p, top, sprint);
+    } else {
+        burndown_chart(app, &p, top, sprint);
+    }
     velocity_chart(app, &p, bottom, sprint);
+}
+
+/// Colour of a column's band: Done in the accent, the others from cool to warm.
+fn flow_color(c: usize, n: usize) -> Color32 {
+    if c + 1 >= n {
+        return pal().accent;
+    }
+    const BANDS: [Color32; 5] = [
+        Color32::from_rgb(158, 158, 170),
+        Color32::from_rgb(66, 133, 244),
+        Color32::from_rgb(171, 71, 188),
+        Color32::from_rgb(255, 167, 38),
+        Color32::from_rgb(38, 166, 154),
+    ];
+    BANDS[c % BANDS.len()]
+}
+
+fn flow_chart(app: &ProjectFcgApp, p: &egui::Painter, r: Rect, sprint: Option<u32>) {
+    let th = pal();
+    let Some(cf) = sprint.and_then(|s| app.project.cumulative_flow(s, now())) else {
+        p.text(r.center(), Align2::CENTER_CENTER, "No sprint selected", FontId::proportional(small_size()), th.text_dim);
+        return;
+    };
+    p.text(r.right_top(), Align2::RIGHT_TOP, "tickets", FontId::proportional(small_size()), th.text_dim);
+    let plot = Rect::from_min_max(r.min + vec2(34.0, 30.0), r.max - vec2(6.0, 22.0));
+    let n = cf.days.len();
+    let ncol = cf.columns.len();
+    let total = cf.counts.iter().flatten().map(|c| c.iter().sum::<usize>()).max().unwrap_or(0);
+    let ymax = axis_max(total as f64);
+    // a point per day, at the day's end
+    let x = |k: usize| plot.left() + plot.width() * (k as f32 + 1.0) / n.max(1) as f32;
+    let y = |v: f64| plot.bottom() - plot.height() * (v / ymax) as f32;
+    let sf = FontId::proportional(small_size() - 1.0);
+    for k in 0..=4 {
+        let v = ymax * k as f64 / 4.0;
+        let yy = y(v);
+        p.line_segment([pos2(plot.left(), yy), pos2(plot.right(), yy)], Stroke::new(1.0, th.grid));
+        p.text(pos2(plot.left() - 5.0, yy), Align2::RIGHT_CENTER, crate::duration::fmt_num(v), sf.clone(), th.text_dim);
+    }
+    let step = ((n as f32 * 34.0 / plot.width()).ceil() as usize).max(1);
+    for (k, d) in cf.days.iter().enumerate() {
+        if k % step == 0 {
+            use chrono::Datelike;
+            p.text(pos2(x(k), plot.bottom() + 4.0), Align2::CENTER_TOP, format!("{}/{}", d.month(), d.day()), sf.clone(), th.text_dim);
+        }
+    }
+    // stacked bands, Done at the bottom (as Jira draws it); one quad per day
+    // pair keeps every shape convex
+    let stack = |c: &Vec<usize>| -> Vec<f64> {
+        // stack[j] = tickets in columns ncol-1 down to ncol-1-j (cumulative)
+        let mut acc = 0.0;
+        (0..ncol).rev().map(|col| {
+            acc += c[col] as f64;
+            acc
+        }).collect()
+    };
+    let known: Vec<(usize, Vec<f64>)> = cf.counts.iter().enumerate().filter_map(|(k, c)| c.as_ref().map(|c| (k, stack(c)))).collect();
+    for w in known.windows(2) {
+        let ((k0, s0), (k1, s1)) = (&w[0], &w[1]);
+        for j in 0..ncol {
+            let col = ncol - 1 - j;
+            let lo0 = if j == 0 { 0.0 } else { s0[j - 1] };
+            let lo1 = if j == 0 { 0.0 } else { s1[j - 1] };
+            let (hi0, hi1) = (s0[j], s1[j]);
+            if hi0 <= lo0 && hi1 <= lo1 {
+                continue;
+            }
+            let pts = vec![pos2(x(*k0), y(lo0)), pos2(x(*k1), y(lo1)), pos2(x(*k1), y(hi1)), pos2(x(*k0), y(hi0))];
+            p.add(egui::Shape::convex_polygon(pts, flow_color(col, ncol).gamma_multiply(0.85), Stroke::NONE));
+        }
+    }
+    if known.len() == 1 {
+        // one day so far: a column of bands
+        let (k, s) = &known[0];
+        for j in 0..ncol {
+            let lo = if j == 0 { 0.0 } else { s[j - 1] };
+            let rr = Rect::from_min_max(pos2(x(*k) - 4.0, y(s[j])), pos2(x(*k) + 4.0, y(lo)));
+            p.rect_filled(rr, 0.0, flow_color(ncol - 1 - j, ncol));
+        }
+    }
+    // legend
+    let ly = r.bottom() - 4.0;
+    let mut lx = plot.left();
+    for (c, name) in cf.columns.iter().enumerate() {
+        p.rect_filled(Rect::from_center_size(pos2(lx + 5.0, ly), vec2(10.0, 8.0)), 1.0, flow_color(c, ncol));
+        let g = p.layout_no_wrap(name.clone(), sf.clone(), th.text_dim);
+        let w = g.size().x;
+        p.galley(pos2(lx + 13.0, ly - g.size().y / 2.0), g, th.text_dim);
+        lx += w + 24.0;
+        if lx > r.right() - 30.0 {
+            break;
+        }
+    }
 }
 
 fn axis_max(v: f64) -> f64 {
@@ -1617,7 +1983,6 @@ fn axis_max(v: f64) -> f64 {
 fn burndown_chart(app: &ProjectFcgApp, p: &egui::Painter, r: Rect, sprint: Option<u32>) {
     let th = pal();
     let est = app.project.board.estimate;
-    p.text(r.left_top(), Align2::LEFT_TOP, "Burndown", FontId::proportional(text_size() + 1.0), th.heading);
     let Some(b) = sprint.and_then(|s| app.project.burndown(s, now())) else {
         p.text(r.center(), Align2::CENTER_CENTER, "No sprint selected", FontId::proportional(small_size()), th.text_dim);
         return;
@@ -1754,6 +2119,7 @@ pub fn show_dialog(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     let p = &app.project;
     let sprints: Vec<(u32, String)> = p.sprint_rows().into_iter().map(|i| (p.tasks[i].uid, p.tasks[i].name.clone())).collect();
     let people: Vec<(u32, String)> = p.resources.iter().filter(|r| r.rtype == crate::model::ResourceType::Work).map(|r| (r.uid, r.name.clone())).collect();
+    let releases: Vec<(u32, String)> = p.board.releases.iter().map(|r| (r.id, r.name.clone())).collect();
     let epics: Vec<(u32, String)> = p.epics().into_iter().map(|k| (p.tickets[k].id, format!("{}  {}", p.ticket_key(p.tickets[k].id), p.tickets[k].title))).collect();
     let parents: Vec<(u32, String)> = p
         .tickets
@@ -1904,6 +2270,17 @@ pub fn show_dialog(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                         }
                     });
                     ui.end_row();
+                    if !releases.is_empty() {
+                        ui.label("Release:");
+                        let cur = st.release.and_then(|u| releases.iter().find(|x| x.0 == u)).map(|x| x.1.clone()).unwrap_or_else(|| "None".into());
+                        egui::ComboBox::from_id_salt("ticket_release").selected_text(cur).width(200.0).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut st.release, None, "None");
+                            for (u, n) in &releases {
+                                ui.selectable_value(&mut st.release, Some(*u), n);
+                            }
+                        });
+                        ui.end_row();
+                    }
                 }
             }
             ui.label("Assignee:");
@@ -2178,6 +2555,10 @@ fn apply_ticket_dialog(p: &mut Project, s: &TicketDlg, points: Option<f64>, labe
     }
     for u in s.after_tasks.iter().filter(|u| !have.contains(u)) {
         p.add_ticket_task_dep(id, *u)?;
+    }
+    let release = if s.kind.is_standard() { s.release } else { None };
+    if p.ticket(id).is_some_and(|t| t.release != release) {
+        p.set_ticket_release(id, release)?;
     }
     Ok(id)
 }

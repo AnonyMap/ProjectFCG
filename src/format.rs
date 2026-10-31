@@ -671,6 +671,8 @@ pub struct GanttFormat {
     pub show_slack: bool,
     pub show_late: bool,
     pub show_baseline: bool,
+    /// Slippage: a line from each task's baseline start to its start.
+    pub show_slippage: bool,
     /// Which baseline the bars show (0 = Baseline, 1–10).
     pub baseline_index: u8,
     pub gridlines: Gridlines,

@@ -17,9 +17,11 @@ pub mod model;
 pub mod mspdi;
 pub mod ops;
 pub mod recurring;
+pub mod releases;
 pub mod resources;
 pub mod schedule;
 pub mod tracking;
+pub mod views;
 
 pub use model::{Project, Task};
 pub use schedule::schedule;

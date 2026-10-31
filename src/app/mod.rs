@@ -7,12 +7,14 @@ pub mod commands;
 pub mod datepicker;
 pub mod dialogs;
 pub mod filebrowser;
+pub mod filters;
 pub mod format_dialogs;
 pub mod gantt;
 pub mod inspector;
 pub mod interchange;
 pub mod sprint_dialogs;
 pub mod prefs;
+pub mod release_dialogs;
 pub mod resource_dialogs;
 pub mod resource_sheet;
 pub mod usage;
@@ -23,6 +25,7 @@ pub mod table;
 pub mod theme;
 pub mod timeline;
 pub mod tracking_dialogs;
+pub mod view_dialogs;
 
 use crate::history::History;
 use crate::model::{fmt_date, Project, Task, TaskMode};
@@ -47,6 +50,8 @@ pub enum RowRef {
 pub enum DisplayRow {
     ProjectSummary,
     Task(usize),
+    /// A Group By header (index into `ProjectFcgApp::groups`).
+    Group(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +68,32 @@ pub struct CellEdit {
     pub focus_requested: bool,
     pub select_all: bool,
     pub picker_open: bool,
+}
+
+/// Copy Picture: the screenshot is asked for, arrives a frame later, and
+/// is encoded while the save dialog is open.
+#[derive(Clone, Debug, Default)]
+pub enum Picture {
+    #[default]
+    None,
+    /// Filled in by the screenshot callback.
+    Requested(std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>),
+    /// PNG bytes waiting for a file name.
+    Ready(Vec<u8>),
+}
+
+/// Encode an image as PNG.
+pub fn encode_png(img: &egui::ColorImage) -> Result<Vec<u8>, String> {
+    let mut out = vec![];
+    {
+        let mut enc = png::Encoder::new(&mut out, img.size[0] as u32, img.size[1] as u32);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().map_err(|e| e.to_string())?;
+        let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+        w.write_image_data(&bytes).map_err(|e| e.to_string())?;
+    }
+    Ok(out)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,6 +124,10 @@ pub struct ViewOptions {
     /// Task ▸ Inspect: the Task Inspector pane.
     pub inspector: bool,
     pub main: MainView,
+    /// View ▸ Filter ▸ Show Related Summary Rows.
+    pub related_summaries: bool,
+    /// Group By headers the user collapsed (by label).
+    pub collapsed_groups: std::collections::HashSet<String>,
 }
 
 impl Default for ViewOptions {
@@ -109,6 +144,8 @@ impl Default for ViewOptions {
             highlight: Filter::AllTasks,
             inspector: false,
             main: MainView::Gantt,
+            related_summaries: false,
+            collapsed_groups: Default::default(),
         }
     }
 }
@@ -119,25 +156,9 @@ impl ViewOptions {
     }
 }
 
-/// Does task `i` pass a built-in filter?
+/// Does task `i` pass a filter? (For many rows, use `filters::FilterEval`.)
 pub fn filter_matches(p: &Project, i: usize, f: Filter) -> bool {
-    let t = &p.tasks[i];
-    match f {
-        Filter::AllTasks => true,
-        Filter::Critical => t.calc.critical,
-        Filter::Milestones => t.is_milestone(),
-        Filter::Summary => t.calc.is_summary,
-        Filter::Incomplete => t.calc.percent_complete < 100.0,
-        Filter::Completed => t.calc.percent_complete >= 100.0,
-        Filter::Late => t.calc.late,
-        Filter::Slipping => {
-            let cal = &p.calendar;
-            match (t.baseline, t.calc.finish) {
-                (Some(b), Some(f)) => cal.work_between(b.finish, f) > 0,
-                _ => false,
-            }
-        }
-    }
+    filters::FilterEval::new(p, f).matches(i)
 }
 
 /// The main view (View tab ▸ Task Views / Resource Views).
@@ -216,6 +237,10 @@ pub struct ProjectFcgApp {
     /// View ▸ Table: which built-in table the sheet shows.
     pub table: columns::Table,
     pub filter: Filter,
+    /// View ▸ Group by.
+    pub group: filters::GroupBy,
+    /// Group headers of the last `display_rows` (rollups for painting).
+    pub groups: std::cell::RefCell<Vec<filters::GroupRow>>,
     pub status: String,
     pub status_error: bool,
     pub dialogs: dialogs::Dialogs,
@@ -244,6 +269,10 @@ pub struct ProjectFcgApp {
     /// Rows that are inactive (themselves or by a summary), for drawing.
     pub inactive_rows: Vec<bool>,
     pub last_gantt_rect: egui::Rect,
+    /// The area the main view was drawn in last frame (Copy Picture).
+    pub last_view_rect: egui::Rect,
+    /// Copy Picture's progress.
+    pub picture: Picture,
     pub sheet: resource_sheet::SheetState,
     pub board: board::BoardState,
     pub usage: usage::UsageState,
@@ -292,6 +321,8 @@ impl ProjectFcgApp {
             table: columns::Table::Entry,
             view: ViewOptions::default(),
             filter: Filter::AllTasks,
+            group: filters::GroupBy::None,
+            groups: Default::default(),
             status: "Ready".into(),
             status_error: false,
             dialogs: dialogs::Dialogs::default(),
@@ -313,6 +344,8 @@ impl ProjectFcgApp {
             last_table_rect: egui::Rect::NOTHING,
             inactive_rows: vec![],
             last_gantt_rect: egui::Rect::NOTHING,
+            last_view_rect: egui::Rect::NOTHING,
+            picture: Picture::None,
             sheet: resource_sheet::SheetState::default(),
             board: board::BoardState::default(),
             usage: usage::UsageState::default(),
@@ -441,17 +474,73 @@ impl ProjectFcgApp {
         if self.view.project_summary {
             out.push(DisplayRow::ProjectSummary);
         }
+        let eval = filters::FilterEval::new(p, self.filter);
+        if self.group != filters::GroupBy::None {
+            // grouped: tasks without their outline, under group headers
+            let inactive = if self.group == filters::GroupBy::Active { p.inactive_mask() } else { vec![] };
+            let mut keyed: Vec<((i64, String), String, usize)> = (0..p.tasks.len())
+                .filter(|&i| !p.tasks[i].calc.is_summary && eval.matches(i))
+                .map(|i| {
+                    let (k, label) = filters::group_key(p, i, self.group, &inactive);
+                    (k, label, i)
+                })
+                .collect();
+            // stable: tasks keep their ID order inside a group
+            keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            let mut groups = vec![];
+            let mut k = 0;
+            while k < keyed.len() {
+                let mut e = k;
+                while e < keyed.len() && keyed[e].1 == keyed[k].1 {
+                    e += 1;
+                }
+                let label = keyed[k].1.clone();
+                let rows: Vec<usize> = keyed[k..e].iter().map(|x| x.2).collect();
+                let collapsed = self.view.collapsed_groups.contains(&label);
+                out.push(DisplayRow::Group(groups.len()));
+                groups.push(filters::rollup(p, label, &rows, collapsed));
+                if !collapsed {
+                    out.extend(rows.into_iter().map(DisplayRow::Task));
+                }
+                k = e;
+            }
+            *self.groups.borrow_mut() = groups;
+            return out;
+        }
         let base: Vec<usize> = if self.view.summary_rows {
             p.visible_rows()
         } else {
             (0..p.tasks.len()).filter(|&i| !p.tasks[i].calc.is_summary).collect()
         };
-        for i in base {
-            if filter_matches(p, i, self.filter) {
-                out.push(DisplayRow::Task(i));
+        if eval.related(self.view.related_summaries) && self.view.summary_rows {
+            // matching tasks plus the summaries above them
+            let mut keep = vec![false; p.tasks.len()];
+            for i in 0..p.tasks.len() {
+                if !keep[i] && eval.matches(i) {
+                    keep[i] = true;
+                    for a in p.ancestors_of(i) {
+                        keep[a] = true;
+                    }
+                }
             }
+            out.extend(base.into_iter().filter(|&i| keep[i]).map(DisplayRow::Task));
+        } else {
+            out.extend(base.into_iter().filter(|&i| eval.matches(i)).map(DisplayRow::Task));
         }
         out
+    }
+
+    /// The name of a filter, custom ones included.
+    pub fn filter_label(&self, f: Filter) -> String {
+        match f {
+            Filter::Custom(k) => self.project.views.filters.get(k).map(|c| c.name.clone()).unwrap_or_else(|| "All Tasks".into()),
+            Filter::DateRange(a, b) => format!("Date Range ({} – {})", a.format("%-m/%-d/%y"), b.format("%-m/%-d/%y")),
+            Filter::UsingResource(r) => match self.project.resources.iter().find(|x| x.uid == r) {
+                Some(x) => format!("Using Resource ({})", x.name),
+                None => "Using Resource".into(),
+            },
+            _ => f.label().into(),
+        }
     }
 
     pub fn scroll_gantt_to(&mut self, dt: NaiveDateTime) {
@@ -638,6 +727,7 @@ impl ProjectFcgApp {
             filebrowser::Mode::ExportCsv => ("csv", "CSV", format!("{}.csv", self.project.title)),
             filebrowser::Mode::ExportJiraCsv => ("csv", "CSV", format!("{} - Jira.csv", self.project.title)),
             filebrowser::Mode::ExportXml => ("xml", "MS Project XML", format!("{}.xml", self.project.title)),
+            filebrowser::Mode::ExportPng => ("png", "PNG image", format!("{} - {}.png", self.project.title, self.view.main.label())),
             _ => (
                 crate::io::EXTENSION,
                 "ProjectFCG project",
@@ -650,6 +740,7 @@ impl ProjectFcgApp {
                 .set_title(match purpose {
                     filebrowser::Mode::SaveAs => "Save As",
                     filebrowser::Mode::ExportXml => "Save as Project XML",
+                    filebrowser::Mode::ExportPng => "Copy Picture",
                     _ => "Export",
                 })
                 .add_filter(filter_name, &[ext])
@@ -690,6 +781,15 @@ impl ProjectFcgApp {
                 match std::fs::write(&path, crate::mspdi::to_xml(&self.project)) {
                     Ok(()) => self.set_status(format!("Saved {} as Project XML", path.display())),
                     Err(e) => self.error(format!("Couldn't save: {e}")),
+                }
+            }
+            filebrowser::Mode::ExportPng => {
+                let path = if path.extension().is_none() { path.with_extension("png") } else { path };
+                if let Picture::Ready(bytes) = std::mem::take(&mut self.picture) {
+                    match std::fs::write(&path, bytes) {
+                        Ok(()) => self.set_status(format!("Saved the picture as {}", path.display())),
+                        Err(e) => self.error(format!("Couldn't save the picture: {e}")),
+                    }
                 }
             }
             filebrowser::Mode::ImportJiraCsv => self.start_jira_import(path),
@@ -1066,8 +1166,28 @@ impl ProjectFcgApp {
             ToggleTimeline => self.view.timeline = !self.view.timeline,
             SetFilter(f) => {
                 self.filter = f;
-                self.set_status(format!("Filter: {}", f.label()));
+                self.set_status(format!("Filter: {}", self.filter_label(f)));
             }
+            SetGroup(g) => {
+                self.group = g;
+                self.view.collapsed_groups.clear();
+                self.scroll_y = 0.0;
+                self.set_status(if g == filters::GroupBy::None { "No Group".into() } else { format!("Grouped by {}", g.label()) });
+            }
+            ToggleRelatedSummaries => self.view.related_summaries = !self.view.related_summaries,
+            ToggleGroupRow(k) => {
+                let label = self.groups.borrow().get(k).map(|g| g.label.clone());
+                if let Some(l) = label {
+                    if !self.view.collapsed_groups.remove(&l) {
+                        self.view.collapsed_groups.insert(l);
+                    }
+                }
+            }
+            DateRangeFilterDlg => self.dialogs.date_range = Some(view_dialogs::DateRangeDlg::new(self)),
+            UsingResourceFilterDlg => self.dialogs.using_resource = Some(view_dialogs::UsingResourceDlg::new(self)),
+            NewFilter => self.dialogs.filter_def = Some(view_dialogs::FilterDefDlg::new(None, &self.project)),
+            EditFilter(k) => self.dialogs.filter_def = Some(view_dialogs::FilterDefDlg::new(Some(k), &self.project)),
+            CustomGroupDlg => self.dialogs.custom_group = Some(view_dialogs::CustomGroupDlg::new(self.group)),
 
             ToggleCritical => {
                 self.edit_project("Critical Tasks", |p| {
@@ -1078,6 +1198,24 @@ impl ProjectFcgApp {
             ToggleSlack => {
                 self.edit_project("Slack", |p| {
                     p.format.show_slack = !p.format.show_slack;
+                    Ok(())
+                });
+            }
+            CopyPicture => {
+                let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+                self.picture = Picture::Requested(slot.clone());
+                let c = ctx.clone();
+                ctx.request_screenshot(move |img| {
+                    if let Ok(mut s) = slot.lock() {
+                        *s = Some(img);
+                    }
+                    c.request_repaint();
+                });
+                self.set_status("Taking a picture of the view…");
+            }
+            ToggleSlippage => {
+                self.edit_project("Slippage", |p| {
+                    p.format.show_slippage = !p.format.show_slippage;
                     Ok(())
                 });
             }
@@ -1781,6 +1919,23 @@ impl ProjectFcgApp {
 
         self.handle_keyboard(&ctx);
         self.update_title(&ctx);
+        // Copy Picture: the screenshot asked for last frame
+        if let Picture::Requested(slot) = &self.picture {
+            let shot = slot.lock().ok().and_then(|mut s| s.take());
+            if let Some(img) = shot {
+                let region = img.region(&self.last_view_rect, Some(ctx.pixels_per_point()));
+                match encode_png(&region) {
+                    Ok(bytes) => {
+                        self.picture = Picture::Ready(bytes);
+                        self.pick_save(filebrowser::Mode::ExportPng);
+                    }
+                    Err(e) => {
+                        self.picture = Picture::None;
+                        self.error(format!("Couldn't make the picture: {e}"));
+                    }
+                }
+            }
+        }
 
         egui::Panel::top("ribbon")
             .resizable(false)
@@ -1821,6 +1976,9 @@ impl ProjectFcgApp {
         tracking_dialogs::show_all(self, &ctx);
         interchange::show_all(self, &ctx);
         sprint_dialogs::show_all(self, &ctx);
+        view_dialogs::show_all(self, &ctx);
+        release_dialogs::show_all(self, &ctx);
+        self.check_filters();
         if let Some(mut fb) = self.file_browser.take() {
             match fb.show(&ctx) {
                 filebrowser::Outcome::Open => self.file_browser = Some(fb),
@@ -1921,6 +2079,7 @@ impl ProjectFcgApp {
 
     fn main_view(&mut self, ui: &mut egui::Ui) {
         let full = ui.available_rect_before_wrap();
+        self.last_view_rect = full;
         match self.view.main {
             MainView::ResourceSheet => return resource_sheet::show(self, ui, full),
             MainView::ResourceUsage => return usage::show(self, ui, full, usage::UsageKind::Resource),

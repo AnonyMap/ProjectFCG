@@ -109,6 +109,11 @@ impl Project {
                 t.task = None;
             }
         }
+        for r in self.board.releases.iter_mut() {
+            if r.task.is_some_and(|u| dead.contains(&u)) {
+                r.task = None;
+            }
+        }
         self.normalize_outline();
     }
 

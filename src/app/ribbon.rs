@@ -270,6 +270,9 @@ fn task_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             if small(ui, "🗐", "Copy", "Copy tasks (Ctrl+C)", has) {
                 app.execute(Command::Copy, &ctx);
             }
+            if small(ui, "📷", "Copy Picture", "Save the view as it looks on screen as a PNG image", true) {
+                app.execute(Command::CopyPicture, &ctx);
+            }
         });
     });
     group(ui, "Schedule", |ui| {
@@ -451,6 +454,14 @@ fn board_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             }
             if small(ui, "✖", "Delete", "Delete the selected ticket (Delete)", sel) {
                 app.execute(Command::DeleteTicket, &ctx);
+            }
+        });
+        ui.vertical(|ui| {
+            if small(ui, "⚑", "New Release", "A release (fix version) groups stories that ship together; it can stand behind a Gantt milestone", true) {
+                app.view.main = super::MainView::Board;
+                app.board.side = super::board::SidePanel::Releases;
+                app.board.backlog_open = true;
+                app.open_release_dialog(None);
             }
         });
     });
@@ -740,22 +751,54 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             });
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Filter:").size(12.0));
+                let customs: Vec<String> = app.project.views.filters.iter().map(|f| f.name.clone()).collect();
                 egui::ComboBox::from_id_salt("filter")
-                    .selected_text(app.filter.label())
+                    .selected_text(app.filter_label(app.filter))
                     .width(130.0)
+                    .height(420.0)
                     .show_ui(ui, |ui| {
                         for f in Filter::ALL {
                             if ui.selectable_label(app.filter == f, f.label()).clicked() {
                                 app.execute(Command::SetFilter(f), &ctx);
                             }
                         }
-                    });
+                        if ui.selectable_label(matches!(app.filter, Filter::DateRange(..)), "Date Range…").clicked() {
+                            app.execute(Command::DateRangeFilterDlg, &ctx);
+                        }
+                        if ui.selectable_label(matches!(app.filter, Filter::UsingResource(_)), "Using Resource…").clicked() {
+                            app.execute(Command::UsingResourceFilterDlg, &ctx);
+                        }
+                        if !customs.is_empty() {
+                            ui.separator();
+                            for (k, name) in customs.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    if ui.selectable_label(app.filter == Filter::Custom(k), name).clicked() {
+                                        app.execute(Command::SetFilter(Filter::Custom(k)), &ctx);
+                                    }
+                                    if ui.small_button("Edit").on_hover_text("Edit this filter").clicked() {
+                                        app.execute(Command::EditFilter(k), &ctx);
+                                    }
+                                });
+                            }
+                        }
+                        ui.separator();
+                        if ui.selectable_label(false, "New Filter…").clicked() {
+                            app.execute(Command::NewFilter, &ctx);
+                        }
+                        let mut rel = app.view.related_summaries;
+                        if ui.checkbox(&mut rel, "Show Related Summary Rows").changed() {
+                            app.execute(Command::ToggleRelatedSummaries, &ctx);
+                        }
+                    })
+                    .response
+                    .on_hover_text("Show only the tasks that match (F3 shows all tasks)");
             });
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Highlight:").size(12.0));
                 let cur = app.view.highlight;
+                let customs: Vec<String> = app.project.views.filters.iter().map(|f| f.name.clone()).collect();
                 egui::ComboBox::from_id_salt("highlight")
-                    .selected_text(if cur == Filter::AllTasks { "No Highlight" } else { cur.label() })
+                    .selected_text(if cur == Filter::AllTasks { "No Highlight".to_string() } else { app.filter_label(cur) })
                     .width(117.0)
                     .show_ui(ui, |ui| {
                         for f in Filter::ALL {
@@ -764,7 +807,32 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
                                 app.execute(Command::SetHighlight(f), &ctx);
                             }
                         }
+                        for (k, name) in customs.iter().enumerate() {
+                            if ui.selectable_label(cur == Filter::Custom(k), name).clicked() {
+                                app.execute(Command::SetHighlight(Filter::Custom(k)), &ctx);
+                            }
+                        }
                     });
+            });
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Group by:").size(12.0));
+                let cur = app.group;
+                egui::ComboBox::from_id_salt("group_by")
+                    .selected_text(cur.label())
+                    .width(120.0)
+                    .show_ui(ui, |ui| {
+                        for g in super::filters::GroupBy::BUILT_IN {
+                            if ui.selectable_label(cur == g, g.label()).clicked() {
+                                app.execute(Command::SetGroup(g), &ctx);
+                            }
+                        }
+                        ui.separator();
+                        if ui.selectable_label(matches!(cur, super::filters::GroupBy::Field(_)), "By Field…").clicked() {
+                            app.execute(Command::CustomGroupDlg, &ctx);
+                        }
+                    })
+                    .response
+                    .on_hover_text("Group tasks under headers that total their dates, work and cost");
             });
         });
     });
@@ -924,6 +992,9 @@ fn format_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             let f = app.project.format.clone();
             if check(ui, f.show_baseline, "Baseline", "Show baseline bars under task bars") {
                 app.execute(Command::ToggleBaselineBars, &ctx);
+            }
+            if check(ui, f.show_slippage, "Slippage", "Show how far each task's start has moved from its baseline start") {
+                app.execute(Command::ToggleSlippage, &ctx);
             }
             ui.menu_button(RichText::new("🚦 Task Path").size(12.0), |ui| {
                 use super::bars::PathRole::*;

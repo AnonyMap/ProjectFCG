@@ -201,6 +201,11 @@ fn velocity_per_sprint_and_average() {
     assert_eq!(p.current_sprint(dt(1, 7, 9)), Some(ua));
     assert_eq!(p.current_sprint(dt(1, 20, 9)), Some(ub));
     assert_eq!(p.current_sprint(dt(6, 1, 9)), Some(ub), "after the last, the last");
+    // the weekend after sprint 1 ends (Fri 1/16): still sprint 1, as in Jira,
+    // until it's completed
+    assert_eq!(p.current_sprint(dt(1, 17, 10)), Some(ua));
+    p.complete_sprint(ua, None, dt(1, 16, 18)).unwrap();
+    assert_eq!(p.current_sprint(dt(1, 17, 10)), Some(ub));
 }
 
 #[test]
@@ -245,6 +250,22 @@ fn board_survives_save_and_old_files_load() {
     let mut q = q;
     let n = q.add_ticket("Next", None).unwrap();
     assert!(n > id);
+}
+
+#[test]
+fn agile_sample_runs_sprint_3_on_any_day_of_the_week() {
+    // Mon 10/26 … Sun 11/1/2026, morning and evening
+    for d in 26..=32u32 {
+        for h in [9, 20] {
+            let date = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap() + chrono::Duration::days(d as i64 - 1);
+            let now = date.and_hms_opt(h, 0, 0).unwrap();
+            let p = projectfcg::app::sample::agile_release_at(now);
+            let s3 = p.tasks[p.sprint_rows()[2]].uid;
+            assert_eq!(p.current_sprint(now), Some(s3), "{now}");
+            assert!(p.board.sprint_meta(s3).is_some_and(|m| m.started.is_some() && m.completed.is_none()), "{now}");
+            assert!(p.tickets.iter().filter(|t| t.sprint == Some(s3)).count() > 3, "{now}");
+        }
+    }
 }
 
 #[test]
@@ -345,4 +366,51 @@ fn editing_columns_remaps_tickets_and_done() {
     assert!(!p.is_done(p.ticket(done).unwrap()));
     assert_eq!(p.ticket(done).unwrap().done_at, None);
     assert!(p.set_board_columns(&[("Only".into(), Some(0), None)], dt(1, 7, 11)).is_err());
+}
+
+#[test]
+fn cumulative_flow_from_column_history() {
+    let (mut p, ua, _) = two_sprints();
+    let a = pts(&mut p, Some(ua), "A", 3.0);
+    let b = pts(&mut p, Some(ua), "B", 3.0);
+    let c = pts(&mut p, Some(ua), "C", 3.0);
+    let done = p.board.done_column();
+    for id in [a, b, c] {
+        let k = p.ticket_index(id).unwrap();
+        p.tickets[k].created = Some(dt(1, 5, 8));
+    }
+    // A: In Progress Tue, Done Thu. B: In Progress Wed. C: untouched.
+    let k = p.ticket_index(a).unwrap();
+    p.tickets[k].history = vec![(dt(1, 6, 10), 1), (dt(1, 8, 15), done)];
+    p.tickets[k].column = done;
+    p.tickets[k].done_at = Some(dt(1, 8, 15));
+    let k = p.ticket_index(b).unwrap();
+    p.tickets[k].history = vec![(dt(1, 7, 9), 1)];
+    p.tickets[k].column = 1;
+    schedule(&mut p);
+    let now = dt(1, 9, 12); // Friday noon
+    let cf = p.cumulative_flow(ua, now).unwrap();
+    assert_eq!(cf.columns.len(), 4);
+    let day = |m, d| cf.days.iter().position(|x| *x == NaiveDate::from_ymd_opt(2026, m, d).unwrap()).unwrap();
+    assert_eq!(cf.counts[day(1, 5)], Some(vec![3, 0, 0, 0]));
+    assert_eq!(cf.counts[day(1, 6)], Some(vec![2, 1, 0, 0]));
+    assert_eq!(cf.counts[day(1, 7)], Some(vec![1, 2, 0, 0]));
+    assert_eq!(cf.counts[day(1, 8)], Some(vec![1, 1, 0, 1]));
+    assert_eq!(cf.counts[day(1, 9)], Some(vec![1, 1, 0, 1]), "today: where they are now");
+    assert_eq!(cf.counts[day(1, 12)], None, "the future is blank");
+    // a ticket with no recorded moves: To Do until it was done
+    let k = p.ticket_index(c).unwrap();
+    p.tickets[k].column = done;
+    p.tickets[k].done_at = Some(dt(1, 7, 11));
+    assert_eq!(p.column_at(&p.tickets[k], dt(1, 6, 23), now), Some(0));
+    assert_eq!(p.column_at(&p.tickets[k], dt(1, 7, 23), now), Some(done));
+    // moving records history, and editing columns remaps it
+    p.move_ticket(b, Some(ua), 2, None).unwrap();
+    let hb = p.ticket(b).unwrap().history.clone();
+    assert_eq!(hb.len(), 2);
+    assert_eq!(hb[1].1, 2);
+    let cols: Vec<(String, Option<usize>, Option<u32>)> = vec![("To Do".into(), Some(0), None), ("Doing".into(), Some(1), None), ("Done".into(), Some(3), None)];
+    p.set_board_columns(&cols, dt(1, 9, 13)).unwrap();
+    let hb = &p.ticket(b).unwrap().history;
+    assert_eq!(hb.iter().map(|h| h.1).collect::<Vec<_>>(), vec![1, 1], "Review folded into Doing");
 }

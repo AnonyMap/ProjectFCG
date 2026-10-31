@@ -1843,6 +1843,7 @@ dependencies = [
  "chrono",
  "eframe",
  "egui",
+ "png",
  "rfd",
  "roxmltree",
  "serde",

@@ -133,6 +133,7 @@ enum Col {
     Created,
     Resolved,
     Updated,
+    FixVersion,
     Outward(LinkKind),
     Inward(LinkKind),
     Ignore,
@@ -175,6 +176,7 @@ fn classify(h: &str) -> Col {
         "created" => Col::Created,
         "resolved" | "resolution date" => Col::Resolved,
         "updated" => Col::Updated,
+        "fix version/s" | "fix versions" | "fix version" | "fixversions" => Col::FixVersion,
         _ => Col::Ignore,
     }
 }
@@ -233,6 +235,7 @@ struct Row {
     created: Option<NaiveDateTime>,
     resolved: Option<NaiveDateTime>,
     updated: Option<NaiveDateTime>,
+    fix_versions: Vec<String>,
     outward: Vec<(LinkKind, String)>,
     inward: Vec<(LinkKind, String)>,
 }
@@ -315,6 +318,7 @@ pub fn import_csv(p: &mut Project, text: &str, opts: &ImportOptions) -> Result<I
             created: None,
             resolved: None,
             updated: None,
+            fix_versions: vec![],
             outward: vec![],
             inward: vec![],
         };
@@ -345,6 +349,11 @@ pub fn import_csv(p: &mut Project, text: &str, opts: &ImportOptions) -> Result<I
                 Col::Created => row.created = parse_jira_date(v),
                 Col::Resolved => row.resolved = parse_jira_date(v),
                 Col::Updated => row.updated = parse_jira_date(v),
+                Col::FixVersion => {
+                    if !row.fix_versions.iter().any(|x| x.eq_ignore_ascii_case(v)) {
+                        row.fix_versions.push(v.to_string());
+                    }
+                }
                 Col::Outward(k) => row.outward.extend(v.split([',', ' ']).filter(|x| !x.is_empty()).map(|x| (*k, x.to_string()))),
                 Col::Inward(k) => row.inward.extend(v.split([',', ' ']).filter(|x| !x.is_empty()).map(|x| (*k, x.to_string()))),
                 Col::Ignore => {}
@@ -376,6 +385,11 @@ pub fn import_csv(p: &mut Project, text: &str, opts: &ImportOptions) -> Result<I
                 let prev = &mut parsed[i];
                 prev.outward.extend(row.outward);
                 prev.inward.extend(row.inward);
+                for v in row.fix_versions {
+                    if !prev.fix_versions.iter().any(|x| x.eq_ignore_ascii_case(&v)) {
+                        prev.fix_versions.push(v);
+                    }
+                }
                 for l in row.labels {
                     if !prev.labels.contains(&l) {
                         prev.labels.push(l);
@@ -552,6 +566,30 @@ pub fn import_csv(p: &mut Project, text: &str, opts: &ImportOptions) -> Result<I
             None => {}
         }
     }
+    // ---- releases (fix versions): the first one listed; added if missing ----
+    let mut extra_versions: Vec<String> = vec![];
+    let mut not_carried = 0;
+    for (i, r) in parsed.iter().enumerate() {
+        let Some(first) = r.fix_versions.first() else { continue };
+        for v in &r.fix_versions[1..] {
+            if !extra_versions.contains(v) {
+                extra_versions.push(v.clone());
+            }
+        }
+        let rel = match p.release_by_name(first) {
+            Some(x) => x,
+            None => p.add_release(first, None)?,
+        };
+        if p.set_ticket_release(new_id[i], Some(rel)).is_err() {
+            not_carried += 1;
+        }
+    }
+    if !extra_versions.is_empty() {
+        rep.warnings.push(format!("Issues in more than one fix version were put in the first one listed; also listed: {}.", extra_versions.join(", ")));
+    }
+    if not_carried > 0 {
+        rep.warnings.push(format!("{not_carried} epic{} or sub-task{} had a fix version; releases hold stories, tasks and bugs, so it was left out.", if not_carried == 1 { "" } else { "s" }, if not_carried == 1 { "" } else { "s" }));
+    }
     if bad_parents > 0 {
         rep.warnings.push(format!("{bad_parents} issue{} had a parent that isn't in the file or doesn't fit (sub-tasks without one became tasks).", if bad_parents == 1 { "" } else { "s" }));
     }
@@ -602,7 +640,7 @@ pub fn export_csv(p: &Project) -> String {
             link_cols.push((kind, n));
         }
     }
-    let mut head: Vec<String> = ["Issue key", "Issue id", "Summary", "Issue Type", "Status", "Priority", "Assignee", "Created", "Resolved", "Sprint", "Custom field (Story Points)", "Parent", "Parent summary", "Description"]
+    let mut head: Vec<String> = ["Issue key", "Issue id", "Summary", "Issue Type", "Status", "Priority", "Assignee", "Created", "Resolved", "Sprint", "Custom field (Story Points)", "Parent", "Parent summary", "Description", "Fix Version/s"]
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -632,6 +670,7 @@ pub fn export_csv(p: &Project) -> String {
             parent.map(|x| x.id.to_string()).unwrap_or_default(),
             parent.map(|x| x.title.clone()).unwrap_or_default(),
             t.description.clone(),
+            t.release.and_then(|r| p.release(r)).map(|r| r.name.clone()).unwrap_or_default(),
         ];
         for i in 0..max_labels {
             cells.push(t.labels.get(i).cloned().unwrap_or_default());

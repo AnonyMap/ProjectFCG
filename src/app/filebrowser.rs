@@ -13,6 +13,7 @@ pub enum Mode {
     ImportJiraCsv,
     ExportJiraCsv,
     ExportXml,
+    ExportPng,
 }
 
 impl Mode {
@@ -70,6 +71,7 @@ impl FileBrowser {
         match self.mode {
             Mode::ExportCsv | Mode::ImportJiraCsv | Mode::ExportJiraCsv => "csv",
             Mode::ExportXml => "xml",
+            Mode::ExportPng => "png",
             _ => crate::io::EXTENSION,
         }
     }
@@ -107,6 +109,7 @@ impl FileBrowser {
             Mode::ImportJiraCsv => "Import Jira CSV",
             Mode::ExportJiraCsv => "Export Board as Jira CSV",
             Mode::ExportXml => "Save as Project XML",
+            Mode::ExportPng => "Copy Picture",
         };
         let mut outcome = Outcome::Open;
         let mut go_to: Option<PathBuf> = None;
