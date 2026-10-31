@@ -84,6 +84,11 @@ impl ReleaseStats {
     }
 }
 
+/// Release names are unique ignoring case (Unicode case, as `repair_board`).
+pub fn same_name(a: &str, b: &str) -> bool {
+    a.trim().to_lowercase() == b.trim().to_lowercase()
+}
+
 /// Only stories, tasks and bugs carry a release: an epic's size is its
 /// stories', and sub-tasks ship with their parent.
 pub fn carries_release(t: &Ticket) -> bool {
@@ -100,8 +105,7 @@ impl Project {
     }
 
     pub fn release_by_name(&self, name: &str) -> Option<u32> {
-        let n = name.trim();
-        self.board.releases.iter().find(|r| r.name.trim().eq_ignore_ascii_case(n)).map(|r| r.id)
+        self.board.releases.iter().find(|r| same_name(&r.name, name)).map(|r| r.id)
     }
 
     /// Add a release (names are unique, ignoring case). Returns its id.
@@ -126,7 +130,7 @@ impl Project {
         if name.is_empty() {
             return Err("A release needs a name.".into());
         }
-        if self.board.releases.iter().any(|r| r.id != id && r.name.trim().eq_ignore_ascii_case(name)) {
+        if self.board.releases.iter().any(|r| r.id != id && same_name(&r.name, name)) {
             return Err(format!("There's already a release called \"{name}\"."));
         }
         if let (Some(s), Some(d)) = (start, date) {
@@ -135,21 +139,24 @@ impl Project {
             }
         }
         let r = self.release_mut(id).ok_or("No such release.")?;
+        let (task, old_date) = (r.task, r.date);
         r.name = name.to_string();
         r.description = description.to_string();
         r.start = start;
         r.date = date;
+        if date.is_none() {
+            self.clear_release_deadline(task, old_date);
+        }
         self.sync_release_deadline(id);
         Ok(())
     }
 
     /// Delete a release; its stories keep everything else.
     pub fn delete_release(&mut self, id: u32) -> OpResult {
-        let n = self.board.releases.len();
+        let r = self.release(id).ok_or("No such release.")?;
+        let (task, date) = (r.task, r.date);
+        self.clear_release_deadline(task, date);
         self.board.releases.retain(|r| r.id != id);
-        if self.board.releases.len() == n {
-            return Err("No such release.".into());
-        }
         for t in self.tickets.iter_mut() {
             if t.release == Some(id) {
                 t.release = None;
@@ -160,12 +167,14 @@ impl Project {
 
     /// Put a story in a release (or take it out with `None`).
     pub fn set_ticket_release(&mut self, ticket: u32, release: Option<u32>) -> OpResult {
+        let k = self.tickets.iter().position(|t| t.id == ticket).ok_or("No such ticket.")?;
         if let Some(r) = release {
-            if self.release(r).is_none() {
-                return Err("No such release.".into());
+            let rel = self.release(r).ok_or("No such release.")?;
+            // a shipped release takes no new work (what's in it stays)
+            if rel.released.is_some() && self.tickets[k].release != Some(r) {
+                return Err(format!("{} is already released; put the work in a later release.", rel.name));
             }
         }
-        let k = self.tickets.iter().position(|t| t.id == ticket).ok_or("No such ticket.")?;
         if release.is_some() && !carries_release(&self.tickets[k]) {
             return Err(match self.tickets[k].kind {
                 IssueType::Epic => "Epics don't go in a release; put their stories in it.".into(),
@@ -254,9 +263,25 @@ impl Project {
             }
         }
         let r = self.release_mut(id).ok_or("No such release.")?;
+        let (old_task, date) = (r.task, r.date);
         r.task = task;
+        if old_task != task {
+            self.clear_release_deadline(old_task, date);
+        }
         self.sync_release_deadline(id);
         Ok(())
+    }
+
+    /// Take a release's date off a milestone it no longer stands for (only
+    /// if the deadline is still the one the release put there).
+    fn clear_release_deadline(&mut self, task: Option<u32>, date: Option<NaiveDate>) {
+        let (Some(u), Some(d)) = (task, date) else { return };
+        let at = crate::calendar::at_minute(d, self.settings.default_finish_minute);
+        if let Some(row) = self.index_of_uid(u) {
+            if self.tasks[row].deadline == Some(at) {
+                self.tasks[row].deadline = None;
+            }
+        }
     }
 
     /// Add a milestone for the release at the end of the plan and tie it to

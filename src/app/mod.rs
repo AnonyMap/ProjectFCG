@@ -477,25 +477,24 @@ impl ProjectFcgApp {
         let eval = filters::FilterEval::new(p, self.filter);
         if self.group != filters::GroupBy::None {
             // grouped: tasks without their outline, under group headers
-            let inactive = if self.group == filters::GroupBy::Active { p.inactive_mask() } else { vec![] };
-            let mut keyed: Vec<((i64, String), String, usize)> = (0..p.tasks.len())
-                .filter(|&i| !p.tasks[i].calc.is_summary && eval.matches(i))
-                .map(|i| {
-                    let (k, label) = filters::group_key(p, i, self.group, &inactive);
-                    (k, label, i)
-                })
+            let cx = filters::GroupCtx::new(p, self.group);
+            let mut keyed: Vec<((i64, String), usize)> = (0..p.tasks.len())
+                // summaries roll up their own subtasks, so they're listed only
+                // when a filter asks for them (Summary Tasks, a custom one)
+                .filter(|&i| (!p.tasks[i].calc.is_summary || self.filter != Filter::AllTasks) && eval.matches(i))
+                .map(|i| (filters::group_key(p, i, self.group, &cx), i))
                 .collect();
             // stable: tasks keep their ID order inside a group
-            keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            keyed.sort_by(|a, b| a.0.cmp(&b.0));
             let mut groups = vec![];
             let mut k = 0;
             while k < keyed.len() {
                 let mut e = k;
-                while e < keyed.len() && keyed[e].1 == keyed[k].1 {
+                while e < keyed.len() && keyed[e].0 == keyed[k].0 {
                     e += 1;
                 }
-                let label = keyed[k].1.clone();
-                let rows: Vec<usize> = keyed[k..e].iter().map(|x| x.2).collect();
+                let label = filters::group_label(p, keyed[k].1, self.group, &cx);
+                let rows: Vec<usize> = keyed[k..e].iter().map(|x| x.1).collect();
                 let collapsed = self.view.collapsed_groups.contains(&label);
                 out.push(DisplayRow::Group(groups.len()));
                 groups.push(filters::rollup(p, label, &rows, collapsed));
@@ -513,15 +512,24 @@ impl ProjectFcgApp {
             (0..p.tasks.len()).filter(|&i| !p.tasks[i].calc.is_summary).collect()
         };
         if eval.related(self.view.related_summaries) && self.view.summary_rows {
-            // matching tasks plus the summaries above them
+            // matching tasks plus the summaries above them, in one pass
+            // with the chain of open summaries on a stack
             let mut keep = vec![false; p.tasks.len()];
+            let mut stack: Vec<usize> = vec![];
             for i in 0..p.tasks.len() {
-                if !keep[i] && eval.matches(i) {
+                let lvl = p.tasks[i].outline_level;
+                while stack.last().is_some_and(|&a| p.tasks[a].outline_level >= lvl) {
+                    stack.pop();
+                }
+                if eval.matches(i) {
                     keep[i] = true;
-                    for a in p.ancestors_of(i) {
-                        keep[a] = true;
+                    for &a in stack.iter().rev() {
+                        if std::mem::replace(&mut keep[a], true) {
+                            break;
+                        }
                     }
                 }
+                stack.push(i);
             }
             out.extend(base.into_iter().filter(|&i| keep[i]).map(DisplayRow::Task));
         } else {
@@ -533,7 +541,7 @@ impl ProjectFcgApp {
     /// The name of a filter, custom ones included.
     pub fn filter_label(&self, f: Filter) -> String {
         match f {
-            Filter::Custom(k) => self.project.views.filters.get(k).map(|c| c.name.clone()).unwrap_or_else(|| "All Tasks".into()),
+            Filter::Custom(k) => self.project.views.filter(k).map(|c| c.name.clone()).unwrap_or_else(|| "All Tasks".into()),
             Filter::DateRange(a, b) => format!("Date Range ({} – {})", a.format("%-m/%-d/%y"), b.format("%-m/%-d/%y")),
             Filter::UsingResource(r) => match self.project.resources.iter().find(|x| x.uid == r) {
                 Some(x) => format!("Using Resource ({})", x.name),
@@ -594,6 +602,9 @@ impl ProjectFcgApp {
         let mut fresh = ProjectFcgApp::new(p);
         fresh.path = path;
         fresh.view = self.view.clone();
+        // filters and groups name this file's tasks, filters and resources
+        fresh.view.highlight = Filter::AllTasks;
+        fresh.view.collapsed_groups.clear();
         fresh.columns = self.columns.clone();
         fresh.table_width = self.table_width;
         fresh.use_portal = self.use_portal;
@@ -1865,13 +1876,11 @@ impl ProjectFcgApp {
         self.active_col = (self.active_col as i32 + dcol).clamp(0, ncols - 1) as usize;
         if extend {
             if let (RowRef::Task(u), Some(anchor)) = (new_row, self.anchor) {
-                if let (Some(a), Some(b)) = (self.row_of_uid(anchor), self.row_of_uid(u)) {
+                // by position on screen (grouped views reorder tasks)
+                let pos = |uid: u32| self.row_of_uid(uid).and_then(|i| task_rows.iter().position(|&r| r == i));
+                if let (Some(a), Some(b)) = (pos(anchor), pos(u)) {
                     let (lo, hi) = (a.min(b), a.max(b));
-                    self.selected = task_rows
-                        .iter()
-                        .filter(|&&r| r >= lo && r <= hi)
-                        .map(|&r| self.project.tasks[r].uid)
-                        .collect();
+                    self.selected = task_rows[lo..=hi].iter().map(|&r| self.project.tasks[r].uid).collect();
                 }
             }
             self.active_row = new_row;

@@ -197,3 +197,61 @@ fn jira_csv_carries_fix_versions() {
     assert!(out.lines().next().unwrap().contains("Fix Version/s"));
     assert!(out.contains("Login") && out.contains(",1.0"), "{out}");
 }
+
+// ---- the 0.8 review's findings ----
+
+#[test]
+fn review_release_deadlines_follow_the_release() {
+    let (mut p, _) = plan();
+    let r = p.add_release("1.0", Some(day(2, 6))).unwrap();
+    let m1 = p.add_release_milestone(r).unwrap();
+    let m2 = p.append_task("Other milestone");
+    let (u1, u2) = (p.tasks[m1].uid, p.tasks[m2].uid);
+    assert_eq!(p.tasks[m1].deadline, Some(dt(2, 6, 17)));
+    // re-tied: the first milestone loses the release's deadline
+    p.set_release_task(r, Some(u2)).unwrap();
+    assert_eq!(p.task_by_uid(u1).unwrap().deadline, None);
+    assert_eq!(p.task_by_uid(u2).unwrap().deadline, Some(dt(2, 6, 17)));
+    // the date cleared: so is the deadline
+    p.update_release(r, "1.0", "", None, None).unwrap();
+    assert_eq!(p.task_by_uid(u2).unwrap().deadline, None);
+    // a deadline someone typed themselves stays
+    p.update_release(r, "1.0", "", None, Some(day(2, 6))).unwrap();
+    let row = p.index_of_uid(u2).unwrap();
+    p.tasks[row].deadline = Some(dt(3, 1, 17));
+    p.delete_release(r).unwrap();
+    assert_eq!(p.task_by_uid(u2).unwrap().deadline, Some(dt(3, 1, 17)));
+}
+
+#[test]
+fn review_released_releases_take_no_new_work_and_names_compare_by_unicode_case() {
+    let (mut p, s) = plan();
+    let r = p.add_release("Ü1", None).unwrap();
+    assert!(p.add_release("ü1", None).is_err());
+    let a = story(&mut p, Some(s[0]), 3.0);
+    let b = story(&mut p, Some(s[0]), 3.0);
+    p.set_ticket_release(a, Some(r)).unwrap();
+    finish(&mut p, a, dt(1, 8, 9));
+    p.release_version(r, dt(1, 16, 17), None).unwrap();
+    assert!(p.set_ticket_release(b, Some(r)).unwrap_err().contains("released"));
+    p.set_ticket_release(a, Some(r)).unwrap(); // what's in it stays
+}
+
+#[test]
+fn review_the_samples_flow_chart_has_history() {
+    let now = dt(10, 28, 11); // Wed 10/28/2026, sprint 3 running
+    let p = projectfcg::app::sample::agile_release_at(now);
+    let s3 = p.tasks[p.sprint_rows()[2]].uid;
+    let cf = p.cumulative_flow(s3, now).unwrap();
+    let known: Vec<&Vec<usize>> = cf.counts.iter().flatten().collect();
+    assert!(known.len() >= 3);
+    for c in &known {
+        assert!(c.iter().sum::<usize>() > 0, "{:?}", cf.counts);
+    }
+    // a ticket whose Created date is after it was done still shows from then
+    let mut q = p.clone();
+    let k = q.tickets.iter().position(|t| q.is_done(t) && t.sprint == Some(s3)).unwrap();
+    let done_at = q.tickets[k].done_at.unwrap();
+    q.tickets[k].created = Some(now);
+    assert_eq!(q.column_at(&q.tickets[k], done_at + chrono::Duration::minutes(1), now), Some(q.board.done_column()));
+}

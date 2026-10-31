@@ -49,22 +49,22 @@ impl UsingResourceDlg {
 
 #[derive(Clone, Debug)]
 pub struct FilterDefDlg {
-    /// Which saved filter is being edited (`None` = a new one).
-    pub index: Option<usize>,
+    /// Which saved filter is being edited (its id; `None` = a new one).
+    pub index: Option<u32>,
     pub filter: CustomFilter,
     pub error: Option<String>,
 }
 
 impl FilterDefDlg {
-    pub fn new(index: Option<usize>, p: &Project) -> Self {
-        let filter = match index.and_then(|k| p.views.filters.get(k)) {
+    pub fn new(index: Option<u32>, p: &Project) -> Self {
+        let filter = match index.and_then(|k| p.views.filter(k)) {
             Some(f) => f.clone(),
             None => {
                 let mut n = p.views.filters.len() + 1;
                 while p.views.filters.iter().any(|f| f.name == format!("Filter {n}")) {
                     n += 1;
                 }
-                CustomFilter { name: format!("Filter {n}"), conditions: vec![Condition::default()], related_summaries: false }
+                CustomFilter { id: 0, name: format!("Filter {n}"), conditions: vec![Condition::default()], related_summaries: false }
             }
         };
         FilterDefDlg { index, filter, error: None }
@@ -262,7 +262,7 @@ fn filter_def(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         return;
     }
     let name = st.filter.name.trim().to_string();
-    let clash = app.project.views.filters.iter().enumerate().any(|(k, f)| Some(k) != st.index && f.name.eq_ignore_ascii_case(&name));
+    let clash = app.project.views.filters.iter().any(|f| Some(f.id) != st.index && f.name.trim().to_lowercase() == name.to_lowercase());
     let err = if name.is_empty() {
         Some("The filter needs a name.".to_string())
     } else if clash {
@@ -280,15 +280,13 @@ fn filter_def(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     let index = st.index;
     let label = if index.is_some() { "Edit Filter" } else { "New Filter" };
     let saved = app.edit_project(label, |p| {
-        Ok(match index {
-            Some(k) if k < p.views.filters.len() => {
-                p.views.filters[k] = f;
-                k
+        Ok(match index.and_then(|k| p.views.filters.iter().position(|x| x.id == k)) {
+            Some(pos) => {
+                let id = p.views.filters[pos].id;
+                p.views.filters[pos] = CustomFilter { id, ..f };
+                id
             }
-            _ => {
-                p.views.filters.push(f);
-                p.views.filters.len() - 1
-            }
+            None => p.views.add(f),
         })
     });
     if let Some(k) = saved {
@@ -318,33 +316,23 @@ fn custom_group(app: &mut ProjectFcgApp, ctx: &egui::Context) {
 }
 
 impl ProjectFcgApp {
-    /// Remove a saved filter; filters after it shift down one place.
-    pub fn delete_custom_filter(&mut self, k: usize) {
-        if self.edit_project("Delete Filter", |p| {
-            if k >= p.views.filters.len() {
+    /// Remove a saved filter (by id); the view stops applying it.
+    pub fn delete_custom_filter(&mut self, k: u32) {
+        self.edit_project("Delete Filter", |p| {
+            let n = p.views.filters.len();
+            p.views.filters.retain(|f| f.id != k);
+            if p.views.filters.len() == n {
                 return Err("No such filter.".into());
             }
-            p.views.filters.remove(k);
             Ok(())
-        })
-        .is_none()
-        {
-            return;
-        }
-        let shift = |f: Filter| match f {
-            Filter::Custom(j) if j == k => Filter::AllTasks,
-            Filter::Custom(j) if j > k => Filter::Custom(j - 1),
-            f => f,
-        };
-        self.filter = shift(self.filter);
-        self.view.highlight = shift(self.view.highlight);
+        });
+        self.check_filters();
     }
 
     /// A saved filter that was removed (by undo, say) stops applying.
     pub fn check_filters(&mut self) {
-        let n = self.project.views.filters.len();
         for f in [&mut self.filter, &mut self.view.highlight] {
-            if matches!(*f, Filter::Custom(k) if k >= n) {
+            if matches!(*f, Filter::Custom(k) if self.project.views.filter(k).is_none()) {
                 *f = Filter::AllTasks;
             }
             if let Filter::UsingResource(r) = *f {

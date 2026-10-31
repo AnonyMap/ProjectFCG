@@ -11,11 +11,49 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct Views {
     pub filters: Vec<CustomFilter>,
+    pub next_filter_id: u32,
+}
+
+impl Views {
+    pub fn filter(&self, id: u32) -> Option<&CustomFilter> {
+        self.filters.iter().find(|f| f.id == id)
+    }
+
+    /// Add a filter, giving it the next id. Returns the id.
+    pub fn add(&mut self, mut f: CustomFilter) -> u32 {
+        self.repair();
+        f.id = self.next_filter_id.max(1);
+        self.next_filter_id = f.id + 1;
+        self.filters.push(f);
+        self.filters.last().unwrap().id
+    }
+
+    /// Give every filter a unique id (files from before ids, hand edits).
+    pub fn repair(&mut self) {
+        let max = self.filters.iter().map(|f| f.id).max().unwrap_or(0);
+        let unique = self.filters.iter().map(|f| f.id).collect::<std::collections::HashSet<_>>().len() == self.filters.len();
+        if self.filters.is_empty() || (self.filters.iter().all(|f| f.id != 0) && unique && self.next_filter_id > max) {
+            return; // nothing to fix: loading and saving gives the same file
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut next = self.filters.iter().map(|f| f.id + 1).max().unwrap_or(1).max(self.next_filter_id).max(1);
+        for f in self.filters.iter_mut() {
+            if f.id == 0 || !seen.insert(f.id) {
+                f.id = next;
+                next += 1;
+                seen.insert(f.id);
+            }
+        }
+        self.next_filter_id = next;
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CustomFilter {
+    /// Stable id: what the view refers to, so undo and deletes can't make
+    /// it point at a different filter.
+    pub id: u32,
     pub name: String,
     pub conditions: Vec<Condition>,
     /// Also show the summary tasks of matching tasks (Project's "Show

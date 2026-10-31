@@ -1021,11 +1021,18 @@ impl Project {
     /// To Do from its creation and Done from when it was done. At or after
     /// `now`, the column it's in.
     pub fn column_at(&self, t: &Ticket, at: NaiveDateTime, now: NaiveDateTime) -> Option<usize> {
-        if t.created.is_some_and(|c| c > at) {
-            return None;
-        }
         if at >= now {
             return Some(t.column);
+        }
+        // it existed by the time anything happened to it, whatever its
+        // Created date says (an import stamps the import time)
+        let first_event = t.history.first().map(|h| h.0).into_iter().chain(t.done_at).min();
+        let created = match (t.created, first_event) {
+            (Some(c), Some(e)) => Some(c.min(e)),
+            (c, _) => c,
+        };
+        if created.is_some_and(|c| c > at) {
+            return None;
         }
         let mut col = 0;
         let mut seen = false;

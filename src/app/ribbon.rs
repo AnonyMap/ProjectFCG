@@ -751,7 +751,7 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             });
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Filter:").size(12.0));
-                let customs: Vec<String> = app.project.views.filters.iter().map(|f| f.name.clone()).collect();
+                let customs: Vec<(u32, String)> = app.project.views.filters.iter().map(|f| (f.id, f.name.clone())).collect();
                 egui::ComboBox::from_id_salt("filter")
                     .selected_text(app.filter_label(app.filter))
                     .width(130.0)
@@ -770,7 +770,7 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
                         }
                         if !customs.is_empty() {
                             ui.separator();
-                            for (k, name) in customs.iter().enumerate() {
+                            for (k, name) in customs.iter().map(|(k, n)| (*k, n)) {
                                 ui.horizontal(|ui| {
                                     if ui.selectable_label(app.filter == Filter::Custom(k), name).clicked() {
                                         app.execute(Command::SetFilter(Filter::Custom(k)), &ctx);
@@ -796,7 +796,7 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Highlight:").size(12.0));
                 let cur = app.view.highlight;
-                let customs: Vec<String> = app.project.views.filters.iter().map(|f| f.name.clone()).collect();
+                let customs: Vec<(u32, String)> = app.project.views.filters.iter().map(|f| (f.id, f.name.clone())).collect();
                 egui::ComboBox::from_id_salt("highlight")
                     .selected_text(if cur == Filter::AllTasks { "No Highlight".to_string() } else { app.filter_label(cur) })
                     .width(117.0)
@@ -807,7 +807,7 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
                                 app.execute(Command::SetHighlight(f), &ctx);
                             }
                         }
-                        for (k, name) in customs.iter().enumerate() {
+                        for (k, name) in customs.iter().map(|(k, n)| (*k, n)) {
                             if ui.selectable_label(cur == Filter::Custom(k), name).clicked() {
                                 app.execute(Command::SetHighlight(Filter::Custom(k)), &ctx);
                             }

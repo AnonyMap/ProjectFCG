@@ -694,6 +694,10 @@ impl Project {
 
     pub fn parent_of(&self, idx: usize) -> Option<usize> {
         let lvl = self.tasks[idx].outline_level;
+        // a top-level task has no parent: don't scan back to row 0 for one
+        if lvl <= 1 {
+            return None;
+        }
         (0..idx).rev().find(|&j| self.tasks[j].outline_level < lvl)
     }
 

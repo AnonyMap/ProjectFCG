@@ -47,19 +47,19 @@ fn cond(field: ColumnId, test: Test, v: &str) -> Condition {
     Condition { field: field.key(), test, value: v.into(), ..Default::default() }
 }
 
-fn add_filter(app: &mut ProjectFcgApp, f: CustomFilter) -> usize {
-    app.edit_project("New Filter", |p| {
-        p.views.filters.push(f);
-        Ok(p.views.filters.len() - 1)
-    })
-    .unwrap()
+fn add_filter(app: &mut ProjectFcgApp, f: CustomFilter) -> u32 {
+    app.edit_project("New Filter", |p| Ok(p.views.add(f))).unwrap()
+}
+
+fn cf(name: &str, conditions: Vec<Condition>, related_summaries: bool) -> CustomFilter {
+    CustomFilter { id: 0, name: name.into(), conditions, related_summaries }
 }
 
 #[test]
 fn custom_filter_compares_durations_as_durations() {
     let (mut a, ctx) = app();
     // "10" < "2" as text; as durations 2 days < 10 days
-    let k = add_filter(&mut a, CustomFilter { name: "Long".into(), conditions: vec![cond(ColumnId::Duration, Test::GreaterOrEqual, "2d")], related_summaries: false });
+    let k = add_filter(&mut a, cf("Long", vec![cond(ColumnId::Duration, Test::GreaterOrEqual, "2d")], false));
     a.execute(Command::SetFilter(Filter::Custom(k)), &ctx);
     // Build (summary, 6 days) passes too
     assert_eq!(names(&a), ["Design", "Build", "Code"]);
@@ -69,15 +69,15 @@ fn custom_filter_compares_durations_as_durations() {
 #[test]
 fn and_or_conditions_and_text_tests() {
     let (mut a, ctx) = app();
-    let f = CustomFilter {
-        name: "Alice or milestones".into(),
-        conditions: vec![
+    let f = cf(
+        "Alice or milestones",
+        vec![
             cond(ColumnId::ResourceNames, Test::Contains, "alice"),
             cond(ColumnId::Duration, Test::Less, "2d"),
             Condition { or: true, ..cond(ColumnId::Milestone, Test::Equals, "Yes") },
         ],
-        related_summaries: false,
-    };
+        false,
+    );
     let k = add_filter(&mut a, f);
     a.execute(Command::SetFilter(Filter::Custom(k)), &ctx);
     // (Alice And < 2 days) Or milestone
@@ -88,15 +88,11 @@ fn and_or_conditions_and_text_tests() {
 fn dates_compare_by_day_and_within_takes_two_values() {
     let (mut a, ctx) = app();
     // Code runs Jan 7 – Jan 13
-    let f = CustomFilter {
-        name: "Starts in week 2".into(),
-        conditions: vec![Condition { value2: "1/9/26".into(), ..cond(ColumnId::Start, Test::Within, "1/7/26") }],
-        related_summaries: false,
-    };
+    let f = cf("Starts in week 2", vec![Condition { value2: "1/9/26".into(), ..cond(ColumnId::Start, Test::Within, "1/7/26") }], false);
     let k = add_filter(&mut a, f);
     a.execute(Command::SetFilter(Filter::Custom(k)), &ctx);
     assert_eq!(names(&a), ["Build", "Code"]);
-    let f = CustomFilter { name: "Start on Jan 7".into(), conditions: vec![cond(ColumnId::Start, Test::Equals, "1/7/2026")], related_summaries: false };
+    let f = cf("Start on Jan 7", vec![cond(ColumnId::Start, Test::Equals, "1/7/2026")], false);
     let k = add_filter(&mut a, f);
     a.execute(Command::SetFilter(Filter::Custom(k)), &ctx);
     assert_eq!(names(&a), ["Build", "Code"]);
@@ -157,7 +153,7 @@ fn group_by_field_and_built_ins() {
 #[test]
 fn filters_are_saved_undone_and_validated() {
     let (mut a, ctx) = app();
-    let k = add_filter(&mut a, CustomFilter { name: "Mine".into(), conditions: vec![cond(ColumnId::Name, Test::Contains, "e")], related_summaries: true });
+    let k = add_filter(&mut a, cf("Mine", vec![cond(ColumnId::Name, Test::Contains, "e")], true));
     a.execute(Command::SetFilter(Filter::Custom(k)), &ctx);
     let text = projectfcg::io::to_json(&a.project).unwrap();
     let back = projectfcg::io::from_json(&text).unwrap();
@@ -176,12 +172,90 @@ fn filters_are_saved_undone_and_validated() {
 }
 
 #[test]
-fn deleting_a_filter_shifts_the_active_one() {
+fn deleting_and_undoing_keeps_the_active_filter() {
     let (mut a, ctx) = app();
-    let k0 = add_filter(&mut a, CustomFilter { name: "A".into(), conditions: vec![], related_summaries: false });
-    let k1 = add_filter(&mut a, CustomFilter { name: "B".into(), conditions: vec![], related_summaries: false });
+    let only = |n: &str| cf(n, vec![cond(ColumnId::Name, Test::Equals, n)], false);
+    let k0 = add_filter(&mut a, only("Design"));
+    let k1 = add_filter(&mut a, only("Code"));
     a.execute(Command::SetFilter(Filter::Custom(k1)), &ctx);
     a.delete_custom_filter(k0);
-    assert_eq!(a.filter, Filter::Custom(0));
-    assert_eq!(a.filter_label(a.filter), "B");
+    assert_eq!(a.filter_label(a.filter), "Code");
+    assert_eq!(names(&a), ["Code"]);
+    // undo brings "Design" back; the view still shows "Code"
+    a.execute(Command::Undo, &ctx);
+    a.check_filters();
+    assert_eq!(a.filter_label(a.filter), "Code");
+    assert_eq!(names(&a), ["Code"]);
+    // deleting the active one stops it applying
+    a.delete_custom_filter(k1);
+    assert_eq!(a.filter, Filter::AllTasks);
+}
+
+// ---- the 0.8 review's findings ----
+
+#[test]
+fn review_shift_arrow_extends_by_screen_order_when_grouped() {
+    let (mut a, ctx) = app();
+    // by duration: Launch (0), Test (1), Design (2), Code (5)
+    a.execute(Command::SetGroup(GroupBy::Duration), &ctx);
+    let test = a.project.tasks.iter().position(|t| t.name == "Test").unwrap();
+    a.select_index(test);
+    a.move_active(1, 0, true);
+    let sel: Vec<String> = a.selected.iter().map(|&u| a.project.task_by_uid(u).unwrap().name.clone()).collect();
+    assert_eq!(sel, ["Test", "Design"]);
+}
+
+#[test]
+fn review_opening_another_file_drops_this_files_highlight() {
+    let (mut a, ctx) = app();
+    let k = add_filter(&mut a, cf("Mine", vec![], false));
+    a.execute(Command::SetHighlight(Filter::Custom(k)), &ctx);
+    a.view.collapsed_groups.insert("x".into());
+    let mut other = Project::new(d(3, 2));
+    other.views.add(cf("Theirs", vec![], false));
+    a.replace_project(other, None);
+    assert_eq!(a.view.highlight, Filter::AllTasks);
+    assert!(a.view.collapsed_groups.is_empty());
+}
+
+#[test]
+fn review_numbers_compare_as_shown_and_parse_strictly() {
+    let (mut a, ctx) = app();
+    a.edit_project("cost", |p| {
+        p.tasks[0].fixed_cost = 0.1 + 0.2;
+        Ok(())
+    });
+    let k = add_filter(&mut a, cf("30 cents", vec![cond(ColumnId::FixedCost, Test::Equals, "$0.30")], false));
+    a.execute(Command::SetFilter(Filter::Custom(k)), &ctx);
+    assert_eq!(names(&a), ["Design"]);
+    assert!(validate(&a.project, &cond(ColumnId::Cost, Test::Less, "(500)")).is_err());
+    assert!(validate(&a.project, &cond(ColumnId::Cost, Test::Less, "1,500.50")).is_ok());
+    assert!(validate(&a.project, &cond(ColumnId::PercentComplete, Test::Less, "50%")).is_ok());
+}
+
+#[test]
+fn review_grouped_summary_filter_lists_summaries_without_double_counting() {
+    let (mut a, ctx) = app();
+    a.execute(Command::SetFilter(Filter::Summary), &ctx);
+    a.execute(Command::SetGroup(GroupBy::Critical), &ctx);
+    let n = names(&a);
+    assert!(n.contains(&"Build".to_string()), "{n:?}");
+    // all tasks: summaries' work isn't added on top of their subtasks'
+    a.execute(Command::SetFilter(Filter::AllTasks), &ctx);
+    a.execute(Command::SetGroup(GroupBy::Milestones), &ctx);
+    a.display_rows();
+    let total: i64 = a.groups.borrow().iter().map(|g| g.work).sum();
+    assert_eq!(total, a.project.calc.total_work);
+}
+
+#[test]
+fn review_old_files_get_filter_ids() {
+    let (mut a, _) = app();
+    a.project.views.filters = vec![cf("A", vec![], false), cf("B", vec![], false)];
+    a.project.views.next_filter_id = 0;
+    let text = projectfcg::io::to_json(&a.project).unwrap();
+    let back = projectfcg::io::from_json(&text).unwrap();
+    let ids: Vec<u32> = back.views.filters.iter().map(|f| f.id).collect();
+    assert!(ids[0] != 0 && ids[1] != 0 && ids[0] != ids[1], "{ids:?}");
+    assert!(back.views.next_filter_id > ids[0].max(ids[1]));
 }

@@ -357,8 +357,12 @@ impl Project {
     /// Format a task's assignments in Project's Resource Names notation:
     /// `Alice,Bob[50%],Cement[10 tons],Travel[$500.00]`.
     pub fn resource_names_text(&self, row: usize) -> String {
-        self.assignments_of_task(row)
-            .iter()
+        self.resource_names_of(&self.assignments_of_task(row))
+    }
+
+    /// Resource Names text for some assignments (indices) of one task.
+    pub fn resource_names_of(&self, ais: &[usize]) -> String {
+        ais.iter()
             .filter_map(|&ai| {
                 let a = &self.assignments[ai];
                 let r = self.resources.iter().find(|r| r.uid == a.resource)?;

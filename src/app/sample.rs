@@ -267,6 +267,10 @@ pub fn agile_release_at(now: chrono::NaiveDateTime) -> Project {
             p.tickets[i].done_at = Some(at);
         }
     }
+    // the backlog was written in discovery, before the first sprint
+    for t in p.tickets.iter_mut() {
+        t.created = Some(start.and_hms_opt(9, 0, 0).unwrap());
+    }
     p.tickets[0].description = "As a new user I can create an account with my email address and a password.".into();
     // Jira-style structure: keys, epics, types, priorities, labels, links
     p.board.key_prefix = "APP".into();

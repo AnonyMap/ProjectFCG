@@ -16,8 +16,8 @@ pub enum Filter {
     DateRange(chrono::NaiveDate, chrono::NaiveDate),
     /// Tasks a resource (uid) is assigned to.
     UsingResource(u32),
-    /// A custom filter saved in the project (index into `views.filters`).
-    Custom(usize),
+    /// A custom filter saved in the project (its id).
+    Custom(u32),
 }
 
 impl Filter {
@@ -224,7 +224,8 @@ pub enum Command {
     DateRangeFilterDlg,
     UsingResourceFilterDlg,
     NewFilter,
-    EditFilter(usize),
+    /// Edit a saved filter (its id).
+    EditFilter(u32),
     CustomGroupDlg,
     ToggleInspector,
     SetBaseline,

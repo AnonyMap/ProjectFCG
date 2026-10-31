@@ -2119,7 +2119,9 @@ pub fn show_dialog(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     let p = &app.project;
     let sprints: Vec<(u32, String)> = p.sprint_rows().into_iter().map(|i| (p.tasks[i].uid, p.tasks[i].name.clone())).collect();
     let people: Vec<(u32, String)> = p.resources.iter().filter(|r| r.rtype == crate::model::ResourceType::Work).map(|r| (r.uid, r.name.clone())).collect();
-    let releases: Vec<(u32, String)> = p.board.releases.iter().map(|r| (r.id, r.name.clone())).collect();
+    // released releases take no new work; the ticket's own stays listed
+    let own_release = st.id.and_then(|i| p.ticket(i)).and_then(|t| t.release);
+    let releases: Vec<(u32, String)> = p.board.releases.iter().filter(|r| r.released.is_none() || Some(r.id) == own_release).map(|r| (r.id, r.name.clone())).collect();
     let epics: Vec<(u32, String)> = p.epics().into_iter().map(|k| (p.tickets[k].id, format!("{}  {}", p.ticket_key(p.tickets[k].id), p.tickets[k].title))).collect();
     let parents: Vec<(u32, String)> = p
         .tickets

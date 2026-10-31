@@ -55,6 +55,7 @@ pub fn from_json(text: &str) -> Result<Project, String> {
         p.next_uid = max_uid + 1;
     }
     p.repair_board();
+    p.views.repair();
     schedule(&mut p);
     Ok(p)
 }

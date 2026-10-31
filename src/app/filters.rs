@@ -116,9 +116,13 @@ pub fn field_value(p: &Project, row: usize, col: ColumnId) -> Value {
     }
 }
 
+/// A number as typed: currency symbols, thousands separators, % and
+/// spaces are allowed around it; anything else means it isn't a number.
 fn parse_num(s: &str) -> Option<f64> {
-    let clean: String = s.chars().filter(|c| c.is_ascii_digit() || matches!(c, '.' | '-')).collect();
-    clean.parse().ok()
+    let t = s.trim().trim_end_matches('%').trim();
+    let t = t.trim_start_matches(|c: char| !c.is_ascii_digit() && c != '-' && c != '.' && !c.is_alphanumeric());
+    let clean: String = t.chars().filter(|&c| c != ',' && c != ' ').collect();
+    clean.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 fn parse_bool(s: &str) -> Option<bool> {
@@ -152,6 +156,8 @@ fn parse_like(p: &Project, like: &Value, s: &str) -> Option<Value> {
 fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
     match (a, b) {
         (Value::Text(x), Value::Text(y)) => Some(x.to_lowercase().cmp(y)),
+        // values shown rounded (money, %) compare as shown
+        (Value::Num(x), Value::Num(y)) if (x - y).abs() < 1e-6 * x.abs().max(y.abs()).max(1.0) => Some(std::cmp::Ordering::Equal),
         (Value::Num(x), Value::Num(y)) => x.partial_cmp(y),
         (Value::Minutes(x), Value::Minutes(y)) => Some(x.cmp(y)),
         (Value::Date(Some(x)), Value::Date(Some(y))) => Some(x.date().cmp(&y.date())),
@@ -186,35 +192,92 @@ pub fn validate(p: &Project, c: &crate::views::Condition) -> Result<(), String> 
     Ok(())
 }
 
-/// Does task `row` pass one condition?
-pub fn condition_matches(p: &Project, row: usize, c: &crate::views::Condition) -> bool {
-    let Some(col) = ColumnId::from_key(&c.field) else { return false };
-    if matches!(c.test, Test::Contains | Test::NotContains) {
-        let has = cell_text(p, row, col).to_lowercase().contains(&c.value.trim().to_lowercase());
-        return has == (c.test == Test::Contains);
+/// A condition with its field looked up and its values parsed, ready to
+/// test many rows.
+#[derive(Clone, Debug)]
+pub struct Compiled {
+    col: Option<ColumnId>,
+    test: Test,
+    or: bool,
+    /// Lower-cased text for contains / does not contain.
+    needle: String,
+    /// `None`: the value doesn't parse for this field, so nothing matches.
+    want: Option<Value>,
+    hi: Option<Value>,
+}
+
+impl Compiled {
+    pub fn new(p: &Project, c: &crate::views::Condition) -> Self {
+        let col = ColumnId::from_key(&c.field);
+        // field kinds don't depend on the row: any task shows the kind
+        let like = match (col, p.tasks.is_empty()) {
+            (Some(col), false) => Some(field_value(p, 0, col)),
+            (Some(col), true) => {
+                let mut probe = Project::new(p.start.date());
+                probe.insert_task(0, "probe");
+                Some(field_value(&probe, 0, col))
+            }
+            (None, _) => None,
+        };
+        let want = like.as_ref().and_then(|l| parse_like(p, l, &c.value));
+        let hi = like.as_ref().filter(|_| c.test.two_values()).and_then(|l| parse_like(p, l, &c.value2));
+        Compiled { col, test: c.test, or: c.or, needle: c.value.trim().to_lowercase(), want, hi }
     }
-    let v = field_value(p, row, col);
-    let Some(want) = parse_like(p, &v, &c.value) else { return false };
-    use std::cmp::Ordering::*;
-    let o = order(&v, &want);
-    match c.test {
-        Test::Equals => o == Some(Equal),
-        Test::NotEquals => o != Some(Equal),
-        Test::Greater => o == Some(Greater),
-        Test::GreaterOrEqual => matches!(o, Some(Greater | Equal)),
-        Test::Less => o == Some(Less),
-        Test::LessOrEqual => matches!(o, Some(Less | Equal)),
-        Test::Within | Test::NotWithin => {
-            let Some(hi) = parse_like(p, &v, &c.value2) else { return false };
-            let inside = matches!(o, Some(Greater | Equal)) && matches!(order(&v, &hi), Some(Less | Equal));
-            inside == (c.test == Test::Within)
+
+    pub fn matches(&self, p: &Project, row: usize) -> bool {
+        let Some(col) = self.col else { return false };
+        if matches!(self.test, Test::Contains | Test::NotContains) {
+            let has = cell_text(p, row, col).to_lowercase().contains(&self.needle);
+            return has == (self.test == Test::Contains);
         }
-        Test::Contains | Test::NotContains => unreachable!(),
+        let Some(want) = &self.want else { return false };
+        let v = field_value(p, row, col);
+        use std::cmp::Ordering::*;
+        let o = order(&v, want);
+        match self.test {
+            Test::Equals => o == Some(Equal),
+            Test::NotEquals => o != Some(Equal),
+            Test::Greater => o == Some(Greater),
+            Test::GreaterOrEqual => matches!(o, Some(Greater | Equal)),
+            Test::Less => o == Some(Less),
+            Test::LessOrEqual => matches!(o, Some(Less | Equal)),
+            Test::Within | Test::NotWithin => {
+                let Some(hi) = &self.hi else { return false };
+                let inside = matches!(o, Some(Greater | Equal)) && matches!(order(&v, hi), Some(Less | Equal));
+                inside == (self.test == Test::Within)
+            }
+            Test::Contains | Test::NotContains => unreachable!(),
+        }
     }
 }
 
+/// Does task `row` pass one condition?
+pub fn condition_matches(p: &Project, row: usize, c: &crate::views::Condition) -> bool {
+    Compiled::new(p, c).matches(p, row)
+}
+
 pub fn custom_matches(p: &Project, row: usize, f: &CustomFilter) -> bool {
-    crate::views::combine(&f.conditions, |c| condition_matches(p, row, c))
+    let cs: Vec<Compiled> = f.conditions.iter().map(|c| Compiled::new(p, c)).collect();
+    compiled_matches(p, row, &cs)
+}
+
+/// "And" binds tighter than "Or" (see `views::combine`).
+fn compiled_matches(p: &Project, row: usize, cs: &[Compiled]) -> bool {
+    if cs.is_empty() {
+        return true;
+    }
+    let mut any = false;
+    let mut group = true;
+    for (k, c) in cs.iter().enumerate() {
+        if k > 0 && c.or {
+            any |= group;
+            group = true;
+        }
+        if group {
+            group = c.matches(p, row);
+        }
+    }
+    any || group
 }
 
 /// A filter ready to test many rows (precomputes what it can).
@@ -222,6 +285,7 @@ pub struct FilterEval<'a> {
     p: &'a Project,
     f: Filter,
     using: Option<HashSet<u32>>,
+    custom: Option<Vec<Compiled>>,
 }
 
 impl<'a> FilterEval<'a> {
@@ -230,7 +294,11 @@ impl<'a> FilterEval<'a> {
             Filter::UsingResource(r) => Some(p.assignments.iter().filter(|a| a.resource == r).map(|a| a.task).collect()),
             _ => None,
         };
-        FilterEval { p, f, using }
+        let custom = match f {
+            Filter::Custom(k) => p.views.filter(k).map(|cf| cf.conditions.iter().map(|c| Compiled::new(p, c)).collect()),
+            _ => None,
+        };
+        FilterEval { p, f, using, custom }
     }
 
     pub fn matches(&self, i: usize) -> bool {
@@ -254,7 +322,7 @@ impl<'a> FilterEval<'a> {
                 _ => false,
             },
             Filter::UsingResource(_) => self.using.as_ref().is_some_and(|u| u.contains(&t.uid)),
-            Filter::Custom(k) => p.views.filters.get(k).is_none_or(|cf| custom_matches(p, i, cf)),
+            Filter::Custom(_) => self.custom.as_ref().is_none_or(|cs| compiled_matches(p, i, cs)),
         }
     }
 
@@ -262,7 +330,7 @@ impl<'a> FilterEval<'a> {
     pub fn related(&self, toggle: bool) -> bool {
         match self.f {
             Filter::AllTasks => false,
-            Filter::Custom(k) => toggle || self.p.views.filters.get(k).is_some_and(|f| f.related_summaries),
+            Filter::Custom(k) => toggle || self.p.views.filter(k).is_some_and(|f| f.related_summaries),
             _ => toggle,
         }
     }
@@ -331,76 +399,149 @@ pub struct GroupRow {
     pub percent_complete: f64,
 }
 
-/// Sort key and label of task `i`'s group. Lower keys come first.
-pub fn group_key(p: &Project, i: usize, g: GroupBy, inactive: &[bool]) -> ((i64, String), String) {
+/// What grouping needs about every task, computed once per pass.
+pub struct GroupCtx {
+    pub inactive: Vec<bool>,
+    /// Resource Names text per task row (Group by Resource).
+    pub names: Vec<String>,
+}
+
+impl GroupCtx {
+    pub fn new(p: &Project, g: GroupBy) -> Self {
+        let inactive = if g == GroupBy::Active { p.inactive_mask() } else { vec![] };
+        let names = if g == GroupBy::Resource || g == GroupBy::Field(ColumnId::ResourceNames) {
+            // one pass over the assignments instead of one per task
+            let mut by_task: std::collections::HashMap<u32, Vec<usize>> = std::collections::HashMap::new();
+            for (k, a) in p.assignments.iter().enumerate() {
+                by_task.entry(a.task).or_default().push(k);
+            }
+            (0..p.tasks.len()).map(|i| by_task.get(&p.tasks[i].uid).map(|ais| p.resource_names_of(ais)).unwrap_or_default()).collect()
+        } else {
+            vec![]
+        };
+        GroupCtx { inactive, names }
+    }
+}
+
+/// Sort key of task `i`'s group: lower keys come first, equal keys share
+/// a group. Cheap: the label is made once per group (`group_label`).
+pub fn group_key(p: &Project, i: usize, g: GroupBy, cx: &GroupCtx) -> (i64, String) {
     let t = &p.tasks[i];
     let c = &t.calc;
-    let yes_no = |name: &str, b: bool| ((b as i64, String::new()), format!("{name}: {}", if b { "Yes" } else { "No" }));
+    let none = String::new;
     match g {
-        GroupBy::None => ((0, String::new()), String::new()),
+        GroupBy::None => (0, none()),
         GroupBy::CompleteIncomplete => {
             let pc = c.percent_complete;
-            if pc <= 0.0 {
-                ((0, String::new()), "0% Complete".into())
-            } else if pc < 100.0 {
-                ((1, String::new()), "1-99% Complete".into())
-            } else {
-                ((2, String::new()), "100% Complete".into())
-            }
+            (if pc <= 0.0 { 0 } else if pc < 100.0 { 1 } else { 2 }, none())
         }
-        GroupBy::ConstraintType => {
-            let k = ConstraintType::ALL.iter().position(|x| *x == t.constraint).unwrap_or(0) as i64;
-            ((k, String::new()), format!("Constraint Type: {}", t.constraint.label()))
-        }
-        GroupBy::Critical => yes_no("Critical", c.critical),
-        GroupBy::Milestones => yes_no("Milestone", t.is_milestone()),
-        GroupBy::Duration => {
-            let m = if c.is_summary { c.summary_duration } else { t.duration.minutes };
-            ((m, String::new()), format!("Duration: {}", cell_text(p, i, ColumnId::Duration)))
-        }
-        GroupBy::Priority => ((t.priority as i64, String::new()), format!("Priority: {}", t.priority)),
+        GroupBy::ConstraintType => (ConstraintType::ALL.iter().position(|x| *x == t.constraint).unwrap_or(0) as i64, none()),
+        GroupBy::Critical => (c.critical as i64, none()),
+        GroupBy::Milestones => (t.is_milestone() as i64, none()),
+        GroupBy::Duration => (if c.is_summary { c.summary_duration } else { t.duration.minutes }, none()),
+        GroupBy::Priority => (t.priority as i64, none()),
         GroupBy::Resource => {
-            let names = p.resource_names_text(i);
+            let names = cx.names.get(i).map(String::as_str).unwrap_or("");
             if names.trim().is_empty() {
-                ((0, String::new()), "No Resource".into())
+                (0, none())
             } else {
-                ((1, names.to_lowercase()), format!("Resource: {names}"))
+                (1, names.to_lowercase())
             }
         }
         GroupBy::Status => {
             use crate::model::TaskStatus as S;
-            let k = match c.status {
-                S::Complete => 0,
-                S::OnSchedule => 1,
-                S::Late => 2,
-                S::FutureTask => 3,
-            };
-            ((k, String::new()), format!("Status: {}", c.status.label()))
+            (
+                match c.status {
+                    S::Complete => 0,
+                    S::OnSchedule => 1,
+                    S::Late => 2,
+                    S::FutureTask => 3,
+                },
+                none(),
+            )
         }
+        GroupBy::Active => (cx.inactive.get(i).copied().unwrap_or(false) as i64, none()),
+        GroupBy::Field(col) => match field_value(p, i, col) {
+            Value::Num(v) if v.is_finite() => (((v * 1000.0).round()) as i64, none()),
+            Value::Num(_) => (i64::MIN, none()),
+            Value::Minutes(m) => (m, none()),
+            Value::Bool(b) => (b as i64, none()),
+            // dates group by week, as Project's default date interval
+            Value::Date(Some(d)) => {
+                let monday = d.date() - chrono::Duration::days(d.weekday().num_days_from_monday() as i64);
+                (monday.num_days_from_ce() as i64, none())
+            }
+            Value::Date(None) => (i64::MIN, none()),
+            Value::Text(s) => {
+                let s = if col == ColumnId::ResourceNames { cx.names.get(i).cloned().unwrap_or_default() } else { s };
+                let s = s.trim();
+                if s.is_empty() {
+                    (0, none())
+                } else {
+                    (1, s.to_lowercase())
+                }
+            }
+        },
+    }
+}
+
+/// The header of task `i`'s group.
+pub fn group_label(p: &Project, i: usize, g: GroupBy, cx: &GroupCtx) -> String {
+    let t = &p.tasks[i];
+    let c = &t.calc;
+    let yes_no = |name: &str, b: bool| format!("{name}: {}", if b { "Yes" } else { "No" });
+    match g {
+        GroupBy::None => String::new(),
+        GroupBy::CompleteIncomplete => {
+            let pc = c.percent_complete;
+            if pc <= 0.0 {
+                "0% Complete".into()
+            } else if pc < 100.0 {
+                "1-99% Complete".into()
+            } else {
+                "100% Complete".into()
+            }
+        }
+        GroupBy::ConstraintType => format!("Constraint Type: {}", t.constraint.label()),
+        GroupBy::Critical => yes_no("Critical", c.critical),
+        GroupBy::Milestones => yes_no("Milestone", t.is_milestone()),
+        GroupBy::Duration => format!("Duration: {}", cell_text(p, i, ColumnId::Duration)),
+        GroupBy::Priority => format!("Priority: {}", t.priority),
+        GroupBy::Resource => {
+            let names = cx.names.get(i).map(String::as_str).unwrap_or("").trim();
+            if names.is_empty() {
+                "No Resource".into()
+            } else {
+                format!("Resource: {names}")
+            }
+        }
+        GroupBy::Status => format!("Status: {}", c.status.label()),
         GroupBy::Active => {
-            let off = inactive.get(i).copied().unwrap_or(false);
-            ((off as i64, String::new()), if off { "Inactive".into() } else { "Active".into() })
+            if cx.inactive.get(i).copied().unwrap_or(false) {
+                "Inactive".into()
+            } else {
+                "Active".into()
+            }
         }
         GroupBy::Field(col) => {
             let title = col.title();
             match field_value(p, i, col) {
-                Value::Num(v) if v.is_finite() => ((((v * 1000.0).round()) as i64, String::new()), format!("{title}: {}", cell_text(p, i, col))),
-                Value::Num(_) => ((i64::MIN, String::new()), format!("{title}: NA")),
-                Value::Minutes(m) => ((m, String::new()), format!("{title}: {}", cell_text(p, i, col))),
+                Value::Num(v) if !v.is_finite() => format!("{title}: NA"),
+                Value::Num(_) | Value::Minutes(_) => format!("{title}: {}", cell_text(p, i, col)),
                 Value::Bool(b) => yes_no(&title, b),
-                // dates group by week, as Project's default date interval
                 Value::Date(Some(d)) => {
                     let monday = d.date() - chrono::Duration::days(d.weekday().num_days_from_monday() as i64);
                     let shown = p.format.layout.date_format.format(monday.and_time(chrono::NaiveTime::MIN));
-                    ((monday.num_days_from_ce() as i64, String::new()), format!("{title}: Week of {shown}"))
+                    format!("{title}: Week of {shown}")
                 }
-                Value::Date(None) => ((i64::MIN, String::new()), format!("{title}: NA")),
+                Value::Date(None) => format!("{title}: NA"),
                 Value::Text(s) => {
-                    let s = s.trim().to_string();
+                    let s = if col == ColumnId::ResourceNames { cx.names.get(i).cloned().unwrap_or_default() } else { s };
+                    let s = s.trim();
                     if s.is_empty() {
-                        ((0, String::new()), format!("{title}: No value"))
+                        format!("{title}: No value")
                     } else {
-                        ((1, s.to_lowercase()), format!("{title}: {s}"))
+                        format!("{title}: {s}")
                     }
                 }
             }
@@ -414,6 +555,7 @@ pub fn rollup(p: &Project, label: String, rows: &[usize], collapsed: bool) -> Gr
     let (mut wsum, mut dsum) = (0.0, 0.0);
     for &i in rows {
         let c = &p.tasks[i].calc;
+        let summary = c.is_summary;
         g.start = match (g.start, c.start) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -422,6 +564,10 @@ pub fn rollup(p: &Project, label: String, rows: &[usize], collapsed: bool) -> Gr
             (Some(a), Some(b)) => Some(a.max(b)),
             (a, b) => a.or(b),
         };
+        // a summary's work and cost are its subtasks': don't count them twice
+        if summary {
+            continue;
+        }
         g.work += c.work;
         g.cost += c.cost;
         let d = p.tasks[i].duration.minutes.max(0) as f64;
@@ -430,10 +576,11 @@ pub fn rollup(p: &Project, label: String, rows: &[usize], collapsed: bool) -> Gr
     }
     g.percent_complete = if dsum > 0.0 {
         wsum / dsum
-    } else if rows.is_empty() {
-        0.0
     } else {
-        rows.iter().map(|&i| p.tasks[i].calc.percent_complete).sum::<f64>() / rows.len() as f64
+        let leaves: Vec<f64> = rows.iter().filter(|&&i| !p.tasks[i].calc.is_summary).map(|&i| p.tasks[i].calc.percent_complete).collect();
+        let all: Vec<f64> = rows.iter().map(|&i| p.tasks[i].calc.percent_complete).collect();
+        let v = if leaves.is_empty() { all } else { leaves };
+        if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 }
     };
     g
 }
