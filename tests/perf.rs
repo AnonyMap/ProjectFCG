@@ -73,3 +73,38 @@ fn probe() {
         eprintln!("  ({} delayed, {} unresolved)", r.delayed.len(), r.unresolved.len());
     }
 }
+
+#[test]
+#[ignore]
+fn views_probe() {
+    use projectfcg::app::columns::ColumnId;
+    use projectfcg::app::commands::{Command, Filter};
+    use projectfcg::app::filters::GroupBy;
+    use projectfcg::views::{Condition, CustomFilter, Test};
+    let shape = Shape { tasks: 5000, resources: 80, ..Default::default() };
+    let p = random_project(7, &shape);
+    let ctx = egui::Context::default();
+    let mut app = ProjectFcgApp::new(p);
+    app.view.timeline = false;
+    frames(&mut app, &ctx, 30, "5000 tasks: plain Gantt");
+    let f = CustomFilter {
+        id: 0,
+        name: "Long or costly".into(),
+        conditions: vec![
+            Condition { field: ColumnId::Duration.key(), test: Test::Greater, value: "3d".into(), ..Default::default() },
+            Condition { or: true, field: ColumnId::Cost.key(), test: Test::Greater, value: "2000".into(), ..Default::default() },
+            Condition { field: ColumnId::Name.key(), test: Test::Contains, value: "1".into(), ..Default::default() },
+        ],
+        related_summaries: true,
+    };
+    let id = app.project.views.add(f);
+    app.execute(Command::SetFilter(Filter::Custom(id)), &ctx);
+    time("display_rows, custom filter", || app.display_rows().len());
+    frames(&mut app, &ctx, 30, "5000 tasks: custom filter");
+    app.execute(Command::SetGroup(GroupBy::Resource), &ctx);
+    time("display_rows, filter + group by resource", || app.display_rows().len());
+    frames(&mut app, &ctx, 30, "5000 tasks: filter + group");
+    app.execute(Command::SetFilter(Filter::AllTasks), &ctx);
+    app.execute(Command::SetGroup(GroupBy::Field(ColumnId::Start)), &ctx);
+    frames(&mut app, &ctx, 30, "5000 tasks: group by start week");
+}

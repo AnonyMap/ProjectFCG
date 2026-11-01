@@ -186,7 +186,30 @@ pub fn build_graph(p: &Project, st: &Structure) -> Graph {
     let mut floors: Vec<Vec<(NaiveDateTime, Lag, i64, u32)>> = vec![vec![]; n];
     let mut board_waiting: Vec<Vec<u32>> = vec![vec![]; n];
     let mut board_notes: Vec<Vec<String>> = vec![vec![]; n];
-    if p.tasks.iter().any(|t| !t.board_deps.is_empty()) {
+    // what each task waits on: its own board dependencies, and for a
+    // release's milestone, every story in the release
+    struct Job {
+        succ: usize,
+        label: String,
+        target: crate::board::DepTarget,
+        lag: Lag,
+        /// The item named on the links (None: the first unfinished one per sprint).
+        ticket: Option<u32>,
+    }
+    let mut jobs: Vec<Job> = vec![];
+    for (succ, t) in p.tasks.iter().enumerate() {
+        for d in &t.board_deps {
+            if let Some(target) = p.resolve_board_dep(d.ticket) {
+                jobs.push(Job { succ, label: p.ticket_key(d.ticket), target, lag: d.lag, ticket: Some(d.ticket) });
+            }
+        }
+    }
+    for r in &p.board.releases {
+        if let Some(&succ) = r.task.and_then(|u| uid_to_idx.get(&u)) {
+            jobs.push(Job { succ, label: format!("release {}", r.name), target: p.resolve_release(r.id), lag: Lag::default(), ticket: None });
+        }
+    }
+    if !jobs.is_empty() {
         // leaf adjacency of the links so far, to refuse loops
         let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
         let add_adj = |adj: &mut Vec<Vec<usize>>, e: &EdgeLink| {
@@ -212,51 +235,53 @@ pub fn build_graph(p: &Project, st: &Structure) -> Graph {
             }
             false
         };
-        for (succ, t) in p.tasks.iter().enumerate() {
-            for d in &t.board_deps {
-                let key = p.ticket_key(d.ticket);
-                let Some(target) = p.resolve_board_dep(d.ticket) else { continue };
-                board_waiting[succ].extend(target.waiting.iter().copied());
-                for &u in &target.unplanned {
-                    board_notes[succ].push(format!("Waits on {}, which isn't planned into a sprint yet, so it can't be scheduled against.", p.ticket_key(u)));
-                }
-                for (done, in_sprint) in &target.done {
-                    // a % lag is a share of the story's sprint
-                    let sprint_row = in_sprint.and_then(|u| uid_to_idx.get(&u).copied());
-                    if let Some(sr) = sprint_row {
-                        // the sprint itself (or its summary) waiting on its own story
-                        if sr == succ || st.is_ancestor(sr, succ) || st.is_ancestor(succ, sr) {
-                            board_notes[succ].push(format!("Waits on {key}, which is in this task's own sprint; ignored."));
-                            continue;
-                        }
-                    }
-                    let pdur = sprint_row.map(|r| p.tasks[r].duration.minutes).unwrap_or(0);
-                    for &l in &st.leaves[succ] {
-                        floors[l].push((*done, d.lag, pdur, d.ticket));
+        for job in &jobs {
+            let succ = job.succ;
+            let key = &job.label;
+            let target = &job.target;
+            board_waiting[succ].extend(target.waiting.iter().copied());
+            for &u in &target.unplanned {
+                board_notes[succ].push(format!("Waits on {}, which isn't planned into a sprint yet, so it can't be scheduled against.", p.ticket_key(u)));
+            }
+            for &(done, in_sprint, item) in &target.done {
+                // a % lag is a share of the story's sprint
+                let sprint_row = in_sprint.and_then(|u| uid_to_idx.get(&u).copied());
+                if let Some(sr) = sprint_row {
+                    // the sprint itself (or its summary) waiting on its own story
+                    if sr == succ || st.is_ancestor(sr, succ) || st.is_ancestor(succ, sr) {
+                        board_notes[succ].push(format!("Waits on {key}, which is in this task's own sprint; ignored."));
+                        continue;
                     }
                 }
-                for &sp in &target.sprints {
-                    let Some(&pred) = uid_to_idx.get(&sp) else { continue };
-                    if st.drives_nothing(pred) {
-                        board_notes[succ].push(format!("Waits on {key} in {}, which is inactive; ignored.", p.tasks[pred].name));
-                        continue;
-                    }
-                    let e = EdgeLink { pred, succ, link: Link { pred: sp, kind: LinkType::FS, lag: d.lag }, board: Some(d.ticket) };
-                    let sprint_name = &p.tasks[pred].name;
-                    if validate_link(st, pred, succ, LinkType::FS).is_err() {
-                        board_notes[succ].push(format!("Waits on {key} in {sprint_name}, which contains this task or is this task; ignored."));
-                        continue;
-                    }
-                    if reaches(&adj, &st.leaves[succ], &st.leaves[pred]) {
-                        board_notes[succ].push(format!("Waits on {key} in {sprint_name}, but {sprint_name} already waits on this task. That loop is ignored: move {key} to another sprint or remove one of the links."));
-                        continue;
-                    }
-                    add_adj(&mut adj, &e);
-                    links.push(e);
+                let pdur = sprint_row.map(|r| p.tasks[r].duration.minutes).unwrap_or(0);
+                for &l in &st.leaves[succ] {
+                    floors[l].push((done, job.lag, pdur, job.ticket.unwrap_or(item)));
                 }
             }
-            board_waiting[succ].sort();
-            board_waiting[succ].dedup();
+            for &sp in &target.sprints {
+                let Some(&pred) = uid_to_idx.get(&sp) else { continue };
+                if st.drives_nothing(pred) {
+                    board_notes[succ].push(format!("Waits on {key} in {}, which is inactive; ignored.", p.tasks[pred].name));
+                    continue;
+                }
+                let item = job.ticket.or_else(|| target.by_sprint.iter().find(|x| x.0 == sp).map(|x| x.1));
+                let e = EdgeLink { pred, succ, link: Link { pred: sp, kind: LinkType::FS, lag: job.lag }, board: item };
+                let sprint_name = &p.tasks[pred].name;
+                if validate_link(st, pred, succ, LinkType::FS).is_err() {
+                    board_notes[succ].push(format!("Waits on {key} in {sprint_name}, which contains this task or is this task; ignored."));
+                    continue;
+                }
+                if reaches(&adj, &st.leaves[succ], &st.leaves[pred]) {
+                    board_notes[succ].push(format!("Waits on {key} in {sprint_name}, but {sprint_name} already waits on this task. That loop is ignored: move the story to another sprint or remove one of the links."));
+                    continue;
+                }
+                add_adj(&mut adj, &e);
+                links.push(e);
+            }
+        }
+        for w in board_waiting.iter_mut() {
+            w.sort();
+            w.dedup();
         }
     }
     let mut incoming = vec![vec![]; n];

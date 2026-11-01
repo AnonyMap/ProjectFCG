@@ -159,7 +159,11 @@ pub fn agile_release_at(now: chrono::NaiveDateTime) -> Project {
     use crate::model::ResourceType;
     use chrono::{Datelike, Duration as D};
     let today = now.date();
-    let monday = today - D::days(today.weekday().num_days_from_monday() as i64);
+    // after Friday's working day, anchor on the coming Monday so that
+    // sprint 3 is still running (it would otherwise have just ended)
+    let wd = today.weekday().num_days_from_monday() as i64;
+    let week_over = wd >= 5 || (wd == 4 && now.time() >= chrono::NaiveTime::from_hms_opt(17, 0, 0).unwrap());
+    let monday = if week_over { today + D::days(7 - wd) } else { today - D::days(wd) };
     let start = monday - D::weeks(6);
     let mut p = Project::new(start);
     p.title = "Mobile App 1.0".into();
@@ -263,6 +267,31 @@ pub fn agile_release_at(now: chrono::NaiveDateTime) -> Project {
             p.tickets[i].done_at = Some(at);
         }
     }
+    // the backlog was written in discovery, before the first sprint
+    for t in p.tickets.iter_mut() {
+        t.created = Some(start.and_hms_opt(9, 0, 0).unwrap());
+    }
+    // how each ticket moved across the board (the cumulative flow chart):
+    // into the next column a working day or so apart, ending where it is
+    let done_col = p.board.done_column();
+    for k in 0..p.tickets.len() {
+        let t = &p.tickets[k];
+        let Some(row) = t.sprint.and_then(|s| p.index_of_uid(s)) else { continue };
+        let ss = p.tasks[row].calc.start.unwrap();
+        let col = t.column;
+        if col == 0 {
+            continue;
+        }
+        let end = if col >= done_col { t.done_at.unwrap_or(now) } else { now - D::hours(3) };
+        let span = p.calendar.work_between(ss, end).max(60);
+        let mut hist = vec![];
+        for c in 1..=col {
+            let frac = c as f64 / (col as f64 + 0.5) * (0.6 + 0.1 * (k % 4) as f64);
+            let at = if c == col && col >= done_col { end } else { p.calendar.add_work(ss, (span as f64 * frac) as i64) };
+            hist.push((at.min(end), c));
+        }
+        p.tickets[k].history = hist;
+    }
     p.tickets[0].description = "As a new user I can create an account with my email address and a password.".into();
     // Jira-style structure: keys, epics, types, priorities, labels, links
     p.board.key_prefix = "APP".into();
@@ -340,6 +369,22 @@ pub fn agile_release_at(now: chrono::NaiveDateTime) -> Project {
     p.add_board_dep(faq, checkout_epic, Lag::default()).expect("board dep");
     let contract_uid = p.tasks[contract].uid;
     p.add_ticket_task_dep(id(&p, "Apple Pay / Google Pay"), contract_uid).expect("task dep");
+    schedule(&mut p);
+    // releases: 1.0 ships what's planned (behind the "Release" milestone),
+    // 1.1 collects the backlog
+    let launch = p.tasks[10].calc.finish.map(|f| f.date());
+    let v1 = p.add_release("1.0", launch).expect("release");
+    let v11 = p.add_release("1.1", launch.map(|d| d + D::weeks(6))).expect("release");
+    let in_sprints: Vec<u32> = p.tickets.iter().filter(|t| t.kind.is_standard() && t.sprint.is_some()).map(|t| t.id).collect();
+    for t in in_sprints {
+        p.set_ticket_release(t, Some(v1)).expect("fix version");
+    }
+    for t in ["Dark mode", "Wish list", "Tablet layout"] {
+        p.set_ticket_release(id(&p, t), Some(v11)).expect("fix version");
+    }
+    p.update_release(v1, "1.0", "First public release on the App Store and Google Play.", None, launch).expect("release");
+    let release_uid = p.tasks[10].uid;
+    p.set_release_task(v1, Some(release_uid)).expect("release milestone");
     schedule(&mut p);
     p
 }

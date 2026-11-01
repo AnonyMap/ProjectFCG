@@ -1870,3 +1870,82 @@ fn recurring_and_inactive_from_the_ui() {
     h.app.execute(Command::ToggleActive, &ctx);
     assert!(h.app.project.tasks[3].active);
 }
+
+#[test]
+fn releases_panel_filters_and_takes_dropped_cards() {
+    use projectfcg::app::board::SidePanel;
+    let mut h = board_h();
+    let s = h.app.board_sprint().unwrap();
+    let v1 = h.app.project.release_by_name("1.0").expect("the sample has release 1.0");
+    let v11 = h.app.project.release_by_name("1.1").unwrap();
+    h.app.board.side = SidePanel::Releases;
+    h.frame(vec![]);
+    assert_eq!(h.app.board.release_rects.len(), 2);
+    // click 1.1: only its tickets show (they're all in the backlog)
+    let r = h.app.board.release_rects.iter().find(|(e, _)| *e == v11).unwrap().1;
+    h.click(r.center());
+    assert_eq!(h.app.board.filter.release, Some(Some(v11)));
+    h.frame(vec![]);
+    assert!(h.app.board.card_rects.is_empty(), "no 1.1 work is in the sprint");
+    for _ in 0..10 {
+        h.frame(vec![]); // past the double-click window
+    }
+    h.click(r.center());
+    assert_eq!(h.app.board.filter.release, None, "a second click clears it");
+    h.frame(vec![]);
+    // drag a 1.0 card from the sprint onto 1.1
+    let card = h.app.project.tickets.iter().find(|t| t.sprint == Some(s) && t.release == Some(v1) && !h.app.project.is_done(t)).unwrap().id;
+    let from = card_center(&h, card);
+    let to = h.app.board.release_rects.iter().find(|(e, _)| *e == v11).unwrap().1.center();
+    h.drag(from, to);
+    assert_eq!(h.app.project.ticket(card).unwrap().release, Some(v11));
+    h.key(Key::Z, ctrl());
+    assert_eq!(h.app.project.ticket(card).unwrap().release, Some(v1), "undo");
+    // the sample's Release milestone stands for 1.0 and waits on its stories
+    let row = h.app.project.tasks.iter().position(|t| t.name == "Release").unwrap();
+    assert_eq!(h.app.project.release_of_task(h.app.project.tasks[row].uid).map(|r| r.id), Some(v1));
+}
+
+#[test]
+fn group_headers_collapse_on_click() {
+    use projectfcg::app::filters::GroupBy;
+    use projectfcg::app::DisplayRow;
+    let mut h = H::new(projectfcg::app::sample::agile_release());
+    let ctx = h.ctx.clone();
+    h.app.execute(Command::SetGroup(GroupBy::Critical), &ctx);
+    h.frame(vec![]);
+    let rows = h.app.display_rows();
+    assert!(matches!(rows[0], DisplayRow::Group(0)));
+    let n = rows.len();
+    let first_group = h.app.groups.borrow()[0].count;
+    let name_col = h.app.columns.iter().position(|c| c.id == ColumnId::Name).unwrap();
+    h.click(h.cell(0, name_col));
+    assert_eq!(h.app.display_rows().len(), n - first_group, "collapsed");
+    for _ in 0..10 {
+        h.frame(vec![]); // past the double-click window
+    }
+    h.click(h.cell(0, name_col));
+    assert_eq!(h.app.display_rows().len(), n, "expanded");
+    // clicking a task row under a group still selects it
+    h.click(h.cell(1, name_col));
+    assert_eq!(h.app.selected.len(), 1);
+}
+
+#[test]
+fn copy_picture_saves_a_png() {
+    use projectfcg::app::filebrowser::Mode;
+    use projectfcg::app::Picture;
+    let mut h = H::blank();
+    let img = egui::ColorImage::filled([4, 3], egui::Color32::RED);
+    let bytes = projectfcg::app::encode_png(&img).unwrap();
+    assert_eq!(&bytes[1..4], b"PNG");
+    // IHDR: width and height, big-endian
+    assert_eq!(&bytes[16..24], &[0, 0, 0, 4, 0, 0, 0, 3]);
+    h.app.picture = Picture::Ready(bytes.clone());
+    let dir = std::env::temp_dir().join(format!("pfcg_picture_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    h.app.finish_save_dialog(Mode::ExportPng, dir.join("gantt"));
+    assert_eq!(std::fs::read(dir.join("gantt.png")).unwrap(), bytes);
+    assert!(matches!(h.app.picture, Picture::None));
+    std::fs::remove_dir_all(&dir).ok();
+}

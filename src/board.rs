@@ -47,6 +47,10 @@ pub struct Ticket {
     /// Gantt tasks (uids) this ticket can't start before: their work has to
     /// be finished first.
     pub after_tasks: Vec<u32>,
+    /// The release (fix version) it ships in. Stories, tasks and bugs only.
+    pub release: Option<u32>,
+    /// When it entered each column (for the cumulative flow diagram).
+    pub history: Vec<(NaiveDateTime, usize)>,
 }
 
 impl Default for Ticket {
@@ -68,6 +72,8 @@ impl Default for Ticket {
             links: vec![],
             task: None,
             after_tasks: vec![],
+            release: None,
+            history: vec![],
         }
     }
 }
@@ -270,6 +276,9 @@ pub struct BoardSettings {
     pub wip: Vec<Option<u32>>,
     /// Goal, commitment and completion of each sprint (by task uid).
     pub sprints: Vec<SprintMeta>,
+    /// Releases (fix versions), in the order shown.
+    pub releases: Vec<crate::releases::Release>,
+    pub next_release_id: u32,
 }
 
 /// Jira's sprint lifecycle on top of the timebox: the goal, what was
@@ -300,6 +309,8 @@ impl Default for BoardSettings {
             key_prefix: String::new(),
             wip: vec![],
             sprints: vec![],
+            releases: vec![],
+            next_release_id: 1,
         }
     }
 }
@@ -363,17 +374,32 @@ pub struct Burndown {
     pub actual: Vec<Option<f64>>,
 }
 
+/// Moves kept per ticket.
+pub const HISTORY_CAP: usize = 64;
+
+/// Cumulative flow: tickets in each column at the end of each working day.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CumulativeFlow {
+    pub days: Vec<NaiveDate>,
+    pub columns: Vec<String>,
+    /// `counts[day][column]`; `None` for days still to come.
+    pub counts: Vec<Option<Vec<usize>>>,
+}
+
 /// What a board dependency resolves to (see `resolve_board_dep`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DepTarget {
     /// Sprints (task uids) whose end the waiting task follows.
     pub sprints: Vec<u32>,
-    /// When the finished items were done, and the sprint they were in.
-    pub done: Vec<(NaiveDateTime, Option<u32>)>,
+    /// When the finished items were done, the sprint they were in, and
+    /// which item it was.
+    pub done: Vec<(NaiveDateTime, Option<u32>, u32)>,
     /// Unfinished items not planned into any sprint.
     pub unplanned: Vec<u32>,
     /// Every unfinished item.
     pub waiting: Vec<u32>,
+    /// For each sprint in `sprints`: the first unfinished item in it.
+    pub by_sprint: Vec<(u32, u32)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -864,6 +890,13 @@ impl Project {
         let k = self.ticket_index(id).ok_or("No such ticket.")?;
         let mut t = self.tickets.remove(k);
         let was_done = t.column >= done_col;
+        if t.column != column {
+            t.history.push((Self::now(), column));
+            // a long-lived ticket keeps its last moves
+            if t.history.len() > HISTORY_CAP {
+                t.history.remove(0);
+            }
+        }
         t.sprint = sprint;
         t.column = column;
         if column >= done_col && !was_done {
@@ -905,6 +938,9 @@ impl Project {
             // a sprint's progress comes from its own tickets, not an epic
             for t in self.tickets.iter_mut().filter(|t| t.task == Some(uid)) {
                 t.task = None;
+            }
+            for r in self.board.releases.iter_mut().filter(|r| r.task == Some(uid)) {
+                r.task = None;
             }
         } else {
             for t in self.tickets.iter_mut().filter(|t| t.sprint == Some(uid)) {
@@ -981,6 +1017,68 @@ impl Project {
         Some(Burndown { days, total, ideal, actual })
     }
 
+    /// Which column a ticket was in at `at`: from its recorded moves, else
+    /// To Do from its creation and Done from when it was done. At or after
+    /// `now`, the column it's in.
+    pub fn column_at(&self, t: &Ticket, at: NaiveDateTime, now: NaiveDateTime) -> Option<usize> {
+        if at >= now {
+            return Some(t.column);
+        }
+        // it existed by the time anything happened to it, whatever its
+        // Created date says (an import stamps the import time)
+        let first_event = t.history.first().map(|h| h.0).into_iter().chain(t.done_at).min();
+        let created = match (t.created, first_event) {
+            (Some(c), Some(e)) => Some(c.min(e)),
+            (c, _) => c,
+        };
+        if created.is_some_and(|c| c > at) {
+            return None;
+        }
+        let mut col = 0;
+        let mut seen = false;
+        for &(when, c) in &t.history {
+            if when <= at {
+                col = c;
+                seen = true;
+            }
+        }
+        if !seen && self.is_done(t) && t.done_at.is_some_and(|d| d <= at) && t.history.is_empty() {
+            col = self.board.done_column();
+        }
+        Some(col.min(self.board.done_column()))
+    }
+
+    /// Cumulative flow for a sprint's tickets (stories, tasks, bugs).
+    pub fn cumulative_flow(&self, sprint_uid: u32, now: NaiveDateTime) -> Option<CumulativeFlow> {
+        let b = self.burndown(sprint_uid, now)?;
+        let mine: Vec<&Ticket> = self.tickets.iter().filter(|k| k.sprint == Some(sprint_uid) && k.kind.is_standard()).collect();
+        let ncol = self.board.columns.len();
+        // the latest working day so far shows where tickets are now (over a
+        // weekend that's Friday)
+        let latest = b.days.iter().rposition(|d| d.and_hms_opt(0, 0, 0).unwrap() <= now);
+        let counts = b
+            .days
+            .iter()
+            .enumerate()
+            .map(|(k, d)| {
+                let start = d.and_hms_opt(0, 0, 0).unwrap();
+                if now < start {
+                    return None;
+                }
+                let end = d.succ_opt().unwrap_or(*d).and_hms_opt(0, 0, 0).unwrap();
+                let at = if now < end || Some(k) == latest { now } else { end - chrono::Duration::seconds(1) };
+                let mut c = vec![0; ncol];
+                for t in &mine {
+                    if let Some(k) = self.column_at(t, at, now) {
+                        c[k.min(ncol - 1)] += 1;
+                    }
+                }
+                Some(c)
+            })
+            .collect();
+        Some(CumulativeFlow { days: b.days, columns: self.board.columns.clone(), counts })
+    }
+
     /// Planned vs completed for every sprint, earliest first.
     pub fn velocity(&self) -> Vec<VelocityRow> {
         self.sprint_rows()
@@ -1020,9 +1118,21 @@ impl Project {
     pub fn current_sprint(&self, now: NaiveDateTime) -> Option<u32> {
         let rows = self.sprint_rows();
         let t = |i: usize| &self.tasks[i];
+        if let Some(&i) = rows.iter().find(|&&i| t(i).calc.start.is_some_and(|s| s <= now) && t(i).calc.finish.is_some_and(|f| now <= f)) {
+            return Some(t(i).uid);
+        }
+        // between sprints (a weekend, say): the one that ended stays current
+        // until it's completed or the next one starts, as Jira's active sprint
+        let last_started = rows.iter().filter(|&&i| t(i).calc.start.is_some_and(|s| s <= now)).max_by_key(|&&i| t(i).calc.start);
+        if let Some(&i) = last_started {
+            let completed = self.board.sprint_meta(t(i).uid).is_some_and(|m| m.completed.is_some());
+            if !completed {
+                return Some(t(i).uid);
+            }
+        }
         rows.iter()
-            .find(|&&i| t(i).calc.start.is_some_and(|s| s <= now) && t(i).calc.finish.is_some_and(|f| now <= f))
-            .or_else(|| rows.iter().find(|&&i| t(i).calc.start.is_some_and(|s| s > now)))
+            .filter(|&&i| t(i).calc.start.is_some_and(|s| s > now))
+            .min_by_key(|&&i| t(i).calc.start)
             .or(rows.last())
             .map(|&i| t(i).uid)
     }
@@ -1118,6 +1228,49 @@ impl Project {
             t.after_tasks.retain(|u| uids.contains(u));
             fixed += n - t.after_tasks.len();
         }
+        // releases: stories only, of releases that exist, tied to real tasks
+        let rels: std::collections::HashSet<u32> = self.board.releases.iter().map(|r| r.id).collect();
+        for t in self.tickets.iter_mut() {
+            if t.release.is_some_and(|r| !rels.contains(&r) || !t.kind.is_standard()) {
+                t.release = None;
+                fixed += 1;
+            }
+        }
+        let mut tied = std::collections::HashSet::new();
+        for k in 0..self.board.releases.len() {
+            if let Some(u) = self.board.releases[k].task {
+                let ok = self.index_of_uid(u).is_some_and(|r| !self.is_summary(r) && !self.tasks[r].is_sprint) && tied.insert(u);
+                if !ok {
+                    self.board.releases[k].task = None;
+                    fixed += 1;
+                }
+            }
+        }
+        let mut names = std::collections::HashSet::new();
+        let mut seen_ids = std::collections::HashSet::new();
+        let n_rel = self.board.releases.len();
+        self.board.releases.retain(|r| seen_ids.insert(r.id));
+        fixed += n_rel - self.board.releases.len();
+        for r in self.board.releases.iter_mut() {
+            let mut name = r.name.trim().to_string();
+            if name.is_empty() {
+                name = format!("Release {}", r.id);
+            }
+            let base = name.clone();
+            let mut n = 2;
+            while !names.insert(name.to_lowercase()) {
+                name = format!("{base} ({n})");
+                n += 1;
+            }
+            if name != r.name {
+                r.name = name;
+                fixed += 1;
+            }
+        }
+        let max_rel = self.board.releases.iter().map(|r| r.id + 1).max().unwrap_or(1);
+        if self.board.next_release_id < max_rel {
+            self.board.next_release_id = max_rel;
+        }
         let max = self.tickets.iter().map(|t| t.id + 1).max().unwrap_or(1);
         if self.next_ticket_id < max {
             self.next_ticket_id = max;
@@ -1136,23 +1289,7 @@ impl Project {
     pub fn resolve_board_dep(&self, ticket: u32) -> Option<DepTarget> {
         let t = self.ticket(ticket)?;
         let mut out = DepTarget::default();
-        let add = |x: &Ticket, out: &mut DepTarget| {
-            if self.is_done(x) {
-                if let Some(d) = x.done_at {
-                    out.done.push((d, x.sprint));
-                }
-            } else {
-                out.waiting.push(x.id);
-                match x.sprint {
-                    Some(sp) if self.task_by_uid(sp).is_some_and(|s| s.is_sprint) => {
-                        if !out.sprints.contains(&sp) {
-                            out.sprints.push(sp);
-                        }
-                    }
-                    _ => out.unplanned.push(x.id),
-                }
-            }
-        };
+        let add = |x: &Ticket, out: &mut DepTarget| self.add_dep_item(x, out);
         if t.kind == IssueType::Epic {
             let kids: Vec<&Ticket> = self.tickets.iter().filter(|x| x.parent == Some(ticket) && x.kind.is_standard()).collect();
             if kids.is_empty() {
@@ -1160,6 +1297,7 @@ impl Project {
                 // an epic with no stories has no sprint to wait for
                 if !self.is_done(t) {
                     out.sprints.clear();
+                    out.by_sprint.clear();
                 }
             }
             for k in kids {
@@ -1169,6 +1307,26 @@ impl Project {
             add(t, &mut out);
         }
         Some(out)
+    }
+
+    /// Add one board item to what a dependency waits for.
+    pub(crate) fn add_dep_item(&self, x: &Ticket, out: &mut DepTarget) {
+        if self.is_done(x) {
+            if let Some(d) = x.done_at {
+                out.done.push((d, x.sprint, x.id));
+            }
+        } else {
+            out.waiting.push(x.id);
+            match x.sprint {
+                Some(sp) if self.task_by_uid(sp).is_some_and(|s| s.is_sprint) => {
+                    if !out.sprints.contains(&sp) {
+                        out.sprints.push(sp);
+                        out.by_sprint.push((sp, x.id));
+                    }
+                }
+                _ => out.unplanned.push(x.id),
+            }
+        }
     }
 
     /// A ticket and everything waiting on it means waiting on: itself, its
@@ -1470,6 +1628,9 @@ impl Project {
         for t in self.tickets.iter_mut() {
             let was_done = t.column >= old_done;
             t.column = resolve(t.column.min(old_n.saturating_sub(1)));
+            for h in t.history.iter_mut() {
+                h.1 = resolve(h.1.min(old_n.saturating_sub(1)));
+            }
             let now_done = t.column >= new_done;
             if now_done && !was_done {
                 t.done_at = t.done_at.or(Some(now));

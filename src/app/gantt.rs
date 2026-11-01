@@ -532,6 +532,19 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
                     super::bars::paint_end(&bp, st.end_shape, x1, r, bars_c32(st.fill), false);
                 }
             }
+            DisplayRow::Group(g) => {
+                let groups = app.groups.borrow();
+                let Some(gr) = groups.get(g) else { continue };
+                let (Some(s), Some(f)) = (gr.start, gr.finish) else { continue };
+                let st = super::bars::style(&fmt, crate::format::BarCategory::Summary);
+                if st.show {
+                    let hh = super::bars::half_h(app, &st);
+                    let (x0, x1) = (xf.x(s), xf.x(f).max(xf.x(s) + 2.0));
+                    let r = super::bars::paint_bar(&bp, x0, x1, y + row_h() / 2.0, hh, &st);
+                    super::bars::paint_end(&bp, st.start_shape, x0, r, bars_c32(st.fill), true);
+                    super::bars::paint_end(&bp, st.end_shape, x1, r, bars_c32(st.fill), false);
+                }
+            }
             DisplayRow::Task(i) => {
                 if !row_visible(d) {
                     continue;
@@ -740,6 +753,7 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
                     }
                 }
                 Some(DisplayRow::ProjectSummary) => {}
+                Some(DisplayRow::Group(_)) => {}
                 None => app.select_single(RowRef::Blank),
             }
         }
@@ -839,6 +853,17 @@ fn paint_task(
                 } else {
                     paint_bar(p, xf.x(b.start), xf.x(b.finish).max(xf.x(b.start) + 2.0), by, hh, &bs);
                 }
+            }
+        }
+    }
+    // Slippage (Format ▸ Slippage): how far the start moved from the baseline
+    if fmt.show_slippage && !t.calc.is_summary {
+        if let (Some(b), Some(s)) = (t.baseline_slot(fmt.baseline_index as usize), t.calc.start) {
+            let (bx, sx) = (xf.x(b.start), xf.x(s));
+            if (bx - sx).abs() >= 1.0 {
+                let col = if sx > bx { pal().warn } else { pal().text_dim };
+                p.line_segment([pos2(bx, row_mid), pos2(sx, row_mid)], Stroke::new(1.5, col));
+                p.line_segment([pos2(bx, row_mid - 3.0), pos2(bx, row_mid + 3.0)], Stroke::new(1.5, col));
             }
         }
     }

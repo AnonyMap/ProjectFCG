@@ -131,6 +131,7 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         next_ticket_id,
         board,
         baseline_saved,
+        views,
         calc: _,
     } = a;
     *title == b.title
@@ -146,6 +147,7 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         && *next_ticket_id == b.next_ticket_id
         && *board == b.board
         && *baseline_saved == b.baseline_saved
+        && *views == b.views
 }
 
 fn rest_of(p: &Project) -> Box<Project> {
@@ -166,6 +168,7 @@ fn rest_of(p: &Project) -> Box<Project> {
         next_ticket_id: p.next_ticket_id,
         board: p.board.clone(),
         baseline_saved: p.baseline_saved,
+        views: p.views.clone(),
         calc: Default::default(),
     })
 }

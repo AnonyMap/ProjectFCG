@@ -593,6 +593,9 @@ pub struct Project {
     /// When each baseline (0–10) was last saved.
     #[serde(default)]
     pub baseline_saved: [Option<NaiveDateTime>; 11],
+    /// Custom filters (View ▸ Filter ▸ New Filter…).
+    #[serde(default)]
+    pub views: crate::views::Views,
     #[serde(skip)]
     pub calc: ProjectCalc,
 }
@@ -636,6 +639,7 @@ impl Project {
             next_ticket_id: 1,
             board: Default::default(),
             baseline_saved: [None; 11],
+            views: Default::default(),
             calc: ProjectCalc::default(),
         }
     }
@@ -690,6 +694,10 @@ impl Project {
 
     pub fn parent_of(&self, idx: usize) -> Option<usize> {
         let lvl = self.tasks[idx].outline_level;
+        // a top-level task has no parent: don't scan back to row 0 for one
+        if lvl <= 1 {
+            return None;
+        }
         (0..idx).rev().find(|&j| self.tasks[j].outline_level < lvl)
     }
 
