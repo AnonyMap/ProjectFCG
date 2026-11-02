@@ -1171,6 +1171,17 @@ fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                     }
                 });
                 let first = st.month - chrono::Duration::days(st.month.weekday().num_days_from_sunday() as i64);
+                // the month shows the work week as it's being edited
+                let mut preview = st.cal.clone();
+                for k in 0..7 {
+                    if !st.week_working[k] {
+                        preview.week[k] = vec![];
+                    } else if let Ok(s) = parse_shifts(&st.week_text[k]) {
+                        if !s.is_empty() {
+                            preview.week[k] = s;
+                        }
+                    }
+                }
                 egui::Grid::new("wt_cal").spacing([2.0, 2.0]).show(ui, |ui| {
                     for w in ["S", "M", "T", "W", "T", "F", "S"] {
                         ui.label(RichText::new(w).size(11.0).color(pal().text_dim));
@@ -1179,8 +1190,8 @@ fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                     for wk in 0..6 {
                         for dw in 0..7 {
                             let d = first + chrono::Duration::days(wk * 7 + dw);
-                            let is_ex = st.cal.exceptions.iter().any(|e| d >= e.start && d <= e.end);
-                            let working = st.cal.is_working_day(d);
+                            let is_ex = preview.exceptions.iter().any(|e| d >= e.start && d <= e.end);
+                            let working = preview.is_working_day(d);
                             let fill = if is_ex {
                                 pal().cal_exception
                             } else if working {
@@ -1201,7 +1212,7 @@ fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                             r.on_hover_text(format!(
                                 "{}: {}",
                                 fmt_date(d.and_hms_opt(0, 0, 0).unwrap()),
-                                shifts_to_text(st.cal.shifts_on(d))
+                                shifts_to_text(preview.shifts_on(d))
                             ));
                         }
                         ui.end_row();

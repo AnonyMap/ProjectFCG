@@ -406,7 +406,7 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 ## Building from source
 
 ```sh
-cargo test                          # 357 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, invariants, UI (headless)
+cargo test                          # 346 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, invariants, UI (headless)
 cargo test --release --test perf -- --ignored --nocapture   # timings on 500–5,000-task projects
 cargo run --release -- --sample
 ./packaging/build-appimage.sh       # → dist/ProjectFCG-x86_64.AppImage
