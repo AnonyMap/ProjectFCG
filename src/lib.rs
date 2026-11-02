@@ -8,6 +8,7 @@ pub mod app;
 pub mod board;
 pub mod calendar;
 pub mod calendars;
+pub mod custom_fields;
 pub mod duration;
 pub mod format;
 pub mod history;

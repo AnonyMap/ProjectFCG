@@ -140,6 +140,8 @@ pub enum Command {
     ExportXml,
     /// File ▸ Print… (Ctrl+P).
     PrintDlg,
+    /// Project ▸ Custom Fields.
+    CustomFieldsDlg,
     /// Save the print-out as a PDF (asks for a file name).
     SavePdf,
     Options,

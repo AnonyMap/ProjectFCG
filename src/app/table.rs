@@ -677,7 +677,7 @@ fn paint_header(app: &mut ProjectFcgApp, ui: &mut egui::Ui, painter: &Painter, r
     for k in 0..app.columns.len() {
         let cell = Rect::from_min_max(pos2(lay.col_x[k], lay.header.top()), pos2(lay.col_x[k + 1], lay.header.bottom()));
         let id = app.columns[k].id;
-        let title = id.title();
+        let title = id.title_in(&app.project);
         let active = k == app.active_col;
         if active {
             clip.rect_filled(cell, 0.0, pal().header_hover);
@@ -708,7 +708,7 @@ fn paint_header(app: &mut ProjectFcgApp, ui: &mut egui::Ui, painter: &Painter, r
             ui.separator();
             ui.menu_button("Insert Column", |ui| {
                 let present: Vec<_> = app.columns.iter().map(|s| s.id).collect();
-                if let Some(c) = super::columns::insert_column_menu(ui, &present) {
+                if let Some(c) = super::columns::insert_column_menu(ui, &present, &app.project) {
                     app.columns.insert(k, super::ColumnState { id: c, width: c.default_width() });
                     ui.close();
                 }

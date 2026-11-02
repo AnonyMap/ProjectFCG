@@ -56,6 +56,7 @@ pub fn from_json(text: &str) -> Result<Project, String> {
     }
     p.repair_board();
     p.repair_calendars();
+    p.repair_custom_fields();
     p.views.repair();
     schedule(&mut p);
     Ok(p)

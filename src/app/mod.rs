@@ -926,6 +926,7 @@ impl ProjectFcgApp {
             ExportJiraCsv => self.pick_save(filebrowser::Mode::ExportJiraCsv),
             ExportXml => self.pick_save(filebrowser::Mode::ExportXml),
             PrintDlg => self.open_print_dialog(),
+            CustomFieldsDlg => self.dialogs.custom_fields = Some(view_dialogs::CustomFieldsDlg::new(&self.project)),
             SavePdf => self.pick_save(filebrowser::Mode::ExportPdf),
             ImportJiraCsv => self.pick_open_for(filebrowser::Mode::ImportJiraCsv),
             Options => self.dialogs.open_options(&self.project),

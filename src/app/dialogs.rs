@@ -171,6 +171,7 @@ pub struct Dialogs {
     pub release: Option<super::release_dialogs::ReleaseDlg>,
     pub release_version: Option<super::release_dialogs::ReleaseVersionDlg>,
     pub print: Option<super::print::PrintDlg>,
+    pub custom_fields: Option<super::view_dialogs::CustomFieldsDlg>,
 }
 
 impl Dialogs {
@@ -207,6 +208,7 @@ impl Dialogs {
             || self.release.is_some()
             || self.release_version.is_some()
             || self.print.is_some()
+            || self.custom_fields.is_some()
             || self.update_tasks.is_some()
             || self.update_project.is_some()
             || self.statistics

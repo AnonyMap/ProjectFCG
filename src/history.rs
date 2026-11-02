@@ -80,6 +80,7 @@ pub fn same_task(a: &Task, b: &Task) -> bool {
         baselines,
         calendar,
         ignore_resource_calendars,
+        custom,
         calc: _,
     } = a;
     *uid == b.uid
@@ -114,6 +115,7 @@ pub fn same_task(a: &Task, b: &Task) -> bool {
         && *baselines == b.baselines
         && *calendar == b.calendar
         && *ignore_resource_calendars == b.ignore_resource_calendars
+        && *custom == b.custom
 }
 
 /// Same for everything in a project that isn't a task (or computed).
@@ -137,6 +139,7 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         baseline_saved,
         views,
         calendars,
+        custom_aliases,
         calc: _,
     } = a;
     *title == b.title
@@ -154,6 +157,7 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         && *baseline_saved == b.baseline_saved
         && *views == b.views
         && *calendars == b.calendars
+        && *custom_aliases == b.custom_aliases
 }
 
 fn rest_of(p: &Project) -> Box<Project> {
@@ -176,6 +180,7 @@ fn rest_of(p: &Project) -> Box<Project> {
         baseline_saved: p.baseline_saved,
         views: p.views.clone(),
         calendars: p.calendars.clone(),
+        custom_aliases: p.custom_aliases.clone(),
         calc: Default::default(),
     })
 }

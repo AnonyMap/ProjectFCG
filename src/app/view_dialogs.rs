@@ -82,17 +82,110 @@ impl CustomGroupDlg {
     }
 }
 
+/// Project ▸ Custom Fields: rename fields, add them as columns.
+#[derive(Clone, Debug)]
+pub struct CustomFieldsDlg {
+    pub kind: crate::custom_fields::FieldKind,
+    /// Aliases being edited, by field name ("Text1").
+    pub aliases: std::collections::BTreeMap<String, String>,
+    /// Fields to add as columns on OK.
+    pub add_columns: Vec<crate::custom_fields::CustomField>,
+    pub error: Option<String>,
+}
+
+impl CustomFieldsDlg {
+    pub fn new(p: &Project) -> Self {
+        let aliases = crate::custom_fields::CustomField::all().into_iter().map(|f| (f.name(), p.custom_aliases.get(&f.name()).cloned().unwrap_or_default())).collect();
+        CustomFieldsDlg { kind: crate::custom_fields::FieldKind::Text, aliases, add_columns: vec![], error: None }
+    }
+}
+
+fn custom_fields(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    use crate::custom_fields::{CustomField, FieldKind, PER_KIND};
+    let Some(mut st) = app.dialogs.custom_fields.take() else { return };
+    let (mut ok, mut cancel) = (false, false);
+    let present: Vec<ColumnId> = app.columns.iter().map(|c| c.id).collect();
+    let keys = modal(ctx, "custom_fields", "Custom Fields", 520.0, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Type:");
+            for k in FieldKind::ALL {
+                ui.selectable_value(&mut st.kind, k, k.label());
+            }
+        });
+        ui.add_space(4.0);
+        egui::Grid::new("cf_grid").num_columns(4).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
+            ui.strong("Field");
+            ui.strong("Name (alias)");
+            ui.strong("Tasks with a value");
+            ui.label("");
+            ui.end_row();
+            for n in 1..=PER_KIND {
+                let f = CustomField::new(st.kind, n);
+                ui.label(f.name());
+                let a = st.aliases.entry(f.name()).or_default();
+                ui.add(egui::TextEdit::singleline(a).desired_width(170.0).hint_text(f.name()));
+                let used = app.project.tasks.iter().filter(|t| t.custom.contains_key(&f.name())).count();
+                ui.label(if used == 0 { String::new() } else { used.to_string() });
+                let shown = present.contains(&ColumnId::Custom(f)) || st.add_columns.contains(&f);
+                if ui.add_enabled(!shown, egui::Button::new(if shown { "In the table" } else { "Add column" }).small()).clicked() {
+                    st.add_columns.push(f);
+                }
+                ui.end_row();
+            }
+        });
+        ui.label(RichText::new("Fields are on every task. Type into their column, filter and group on them; Project XML carries them as Project's own custom fields.").size(11.0).color(pal().text_dim));
+        if let Some(e) = &st.error {
+            ui.colored_label(pal().warn, e);
+        }
+        (ok, cancel) = ok_cancel(ui);
+    });
+    if cancel || keys.esc {
+        return;
+    }
+    if !(ok || keys.enter) {
+        app.dialogs.custom_fields = Some(st);
+        return;
+    }
+    let aliases = st.aliases.clone();
+    let res = app.edit_project("Custom Fields", move |p| {
+        // all at once, so two fields can swap names
+        p.custom_aliases.clear();
+        for (k, a) in &aliases {
+            if let Some(f) = CustomField::parse(k) {
+                p.set_custom_alias(f, a)?;
+            }
+        }
+        Ok(())
+    });
+    if res.is_none() {
+        st.error = Some(app.status.clone());
+        app.dialogs.custom_fields = Some(st);
+        return;
+    }
+    for f in st.add_columns {
+        let at = (app.active_col + 1).min(app.columns.len());
+        app.columns.insert(at, super::ColumnState { id: ColumnId::Custom(f), width: 110.0 });
+    }
+}
+
 pub fn show_all(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    custom_fields(app, ctx);
     date_range(app, ctx);
     using_resource(app, ctx);
     filter_def(app, ctx);
     custom_group(app, ctx);
 }
 
-fn field_combo(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, col: &mut ColumnId, width: f32) {
-    egui::ComboBox::from_id_salt(id).selected_text(col.title()).width(width).height(360.0).show_ui(ui, |ui| {
+fn field_combo(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, col: &mut ColumnId, width: f32, p: &Project) {
+    egui::ComboBox::from_id_salt(id).selected_text(col.title_in(p)).width(width).height(360.0).show_ui(ui, |ui| {
         for c in ColumnId::filterable() {
-            ui.selectable_value(col, c, c.title());
+            // unused, unnamed custom fields would only clutter the list
+            if let ColumnId::Custom(f) = c {
+                if !p.custom_fields_in_use().contains(&f) && *col != c {
+                    continue;
+                }
+            }
+            ui.selectable_value(col, c, c.title_in(p));
         }
     });
 }
@@ -200,7 +293,7 @@ fn filter_def(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                     });
                 }
                 let mut col = ColumnId::from_key(&c.field).unwrap_or(ColumnId::Name);
-                field_combo(ui, ("fd_field", k), &mut col, 170.0);
+                field_combo(ui, ("fd_field", k), &mut col, 170.0, &app.project);
                 c.field = col.key();
                 egui::ComboBox::from_id_salt(("fd_test", k)).selected_text(c.test.label()).width(170.0).show_ui(ui, |ui| {
                     for t in Test::ALL {
@@ -300,7 +393,7 @@ fn custom_group(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     let keys = modal(ctx, "custom_group", "Group By a Field", 380.0, |ui| {
         ui.horizontal(|ui| {
             ui.label("Group by:");
-            field_combo(ui, "cg_field", &mut st.field, 200.0);
+            field_combo(ui, "cg_field", &mut st.field, 200.0, &app.project);
         });
         ui.label(RichText::new("Dates are grouped by week.").size(11.0).color(pal().text_dim));
         (ok, cancel) = ok_cancel(ui);

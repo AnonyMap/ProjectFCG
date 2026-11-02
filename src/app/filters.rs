@@ -12,9 +12,15 @@ use std::collections::HashSet;
 impl ColumnId {
     /// Name used to save a field in a custom filter.
     pub fn key(&self) -> String {
-        format!("{self:?}")
+        match self {
+            ColumnId::Custom(f) => f.name(),
+            _ => format!("{self:?}"),
+        }
     }
     pub fn from_key(k: &str) -> Option<ColumnId> {
+        if let Some(f) = crate::custom_fields::CustomField::parse(k) {
+            return Some(ColumnId::Custom(f));
+        }
         ColumnId::ALL.iter().copied().find(|c| c.key() == k)
     }
     /// Fields a filter or group can test (everything with a value).
@@ -111,6 +117,19 @@ pub fn field_value(p: &Project, row: usize, col: ColumnId) -> Value {
         C::Milestone => Value::Bool(t.is_milestone()),
         C::EffortDriven => Value::Bool(t.effort_driven),
         C::Overallocated => Value::Bool(c.overallocated),
+        C::Custom(f) => {
+            use crate::custom_fields::{CustomValue as V, FieldKind as K};
+            match (p.custom_value(row, f), f.kind) {
+                (Some(V::Number(v)), _) | (Some(V::Cost(v)), _) => Value::Num(*v),
+                (Some(V::Flag(b)), _) => Value::Bool(*b),
+                (Some(V::Date(d)), _) => Value::Date(Some(*d)),
+                (Some(V::Text(s)), _) => Value::Text(s.clone()),
+                (None, K::Number | K::Cost) => Value::Num(0.0),
+                (None, K::Flag) => Value::Bool(false),
+                (None, K::Date) => Value::Date(None),
+                (None, K::Text) => Value::Text(String::new()),
+            }
+        }
         // the text a summary's actual dates show is derived; compare it as text
         _ => Value::Text(cell_text(p, row, col)),
     }
@@ -184,7 +203,7 @@ pub fn validate(p: &Project, c: &crate::views::Condition) -> Result<(), String> 
         Value::Date(_) => "date",
         Value::Bool(_) => "Yes or No",
     };
-    let check = |v: &str| parse_like(p, &like, v).map(|_| ()).ok_or_else(|| format!("{}: \"{}\" isn't a {kind}.", col.title(), v.trim()));
+    let check = |v: &str| parse_like(p, &like, v).map(|_| ()).ok_or_else(|| format!("{}: \"{}\" isn't a {kind}.", col.title_in(p), v.trim()));
     check(&c.value)?;
     if c.test.two_values() {
         check(&c.value2)?;
@@ -524,7 +543,7 @@ pub fn group_label(p: &Project, i: usize, g: GroupBy, cx: &GroupCtx) -> String {
             }
         }
         GroupBy::Field(col) => {
-            let title = col.title();
+            let title = col.title_in(p);
             match field_value(p, i, col) {
                 Value::Num(v) if !v.is_finite() => format!("{title}: NA"),
                 Value::Num(_) | Value::Minutes(_) => format!("{title}: {}", cell_text(p, i, col)),

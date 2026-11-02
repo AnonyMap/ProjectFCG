@@ -595,8 +595,11 @@ fn project_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         if big(ui, "ℹ", "Project\nInformation", "Project start date, calendar and statistics", true) {
             app.execute(Command::ProjectInfo, &ctx);
         }
-        if big(ui, "📅", "Change\nWorking Time", "Edit the project calendar", true) {
+        if big(ui, "📅", "Change\nWorking Time", "Edit the project calendar and the calendars tasks can use", true) {
             app.execute(Command::WorkingTime, &ctx);
+        }
+        if big(ui, "🏷", "Custom\nFields", "Rename Text, Number, Flag, Date and Cost fields and add them as columns", true) {
+            app.execute(Command::CustomFieldsDlg, &ctx);
         }
     });
     group(ui, "Schedule", |ui| {
@@ -947,7 +950,7 @@ fn format_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.menu_button(RichText::new("➕ Insert Column").size(12.0), |ui| {
                 let present: Vec<_> = app.columns.iter().map(|s| s.id).collect();
-                if let Some(c) = super::columns::insert_column_menu(ui, &present) {
+                if let Some(c) = super::columns::insert_column_menu(ui, &present, &app.project) {
                     let at = (app.active_col + 1).min(app.columns.len());
                     let w = (c.default_width() * app.prefs.text_size / DEFAULT_TEXT_SIZE).round();
                     app.columns.insert(at, super::ColumnState { id: c, width: w });

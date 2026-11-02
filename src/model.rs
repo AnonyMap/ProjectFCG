@@ -292,6 +292,9 @@ pub struct Task {
     /// Scheduling ignores resource calendars (only the task calendar counts).
     #[serde(default)]
     pub ignore_resource_calendars: bool,
+    /// Custom field values ("Text1" → value); unset fields aren't stored.
+    #[serde(default)]
+    pub custom: std::collections::BTreeMap<String, crate::custom_fields::CustomValue>,
     #[serde(skip)]
     pub calc: Computed,
 }
@@ -501,6 +504,7 @@ impl Task {
             baselines: [None; 10],
             calendar: None,
             ignore_resource_calendars: false,
+            custom: Default::default(),
             calc: Computed::default(),
         }
     }
@@ -608,6 +612,9 @@ pub struct Project {
     /// 24 Hours, your own).
     #[serde(default)]
     pub calendars: Vec<BaseCalendar>,
+    /// Custom field renames (Project ▸ Custom Fields): "Text1" → "Team".
+    #[serde(default)]
+    pub custom_aliases: std::collections::BTreeMap<String, String>,
     #[serde(skip)]
     pub calc: ProjectCalc,
 }
@@ -660,6 +667,7 @@ impl Project {
             baseline_saved: [None; 11],
             views: Default::default(),
             calendars: vec![],
+            custom_aliases: Default::default(),
             calc: ProjectCalc::default(),
         }
     }

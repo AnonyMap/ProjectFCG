@@ -210,7 +210,7 @@ pub fn print_pdf(app: &ProjectFcgApp, o: &PrintOptions) -> Vec<u8> {
             pg.text(tx0 + 3.0, btop - 8.0, "ID", Font::Bold, FONT, Rgb::BLACK);
             let mut x = tx0 + 22.0;
             for (c, cw) in &cols {
-                pg.text(x + 3.0, btop - 8.0, &fit_text(&c.title(), Font::Bold, FONT, cw - 6.0), Font::Bold, FONT, Rgb::BLACK);
+                pg.text(x + 3.0, btop - 8.0, &fit_text(&c.title_in(p), Font::Bold, FONT, cw - 6.0), Font::Bold, FONT, Rgb::BLACK);
                 x += cw;
             }
             pg.clip(cx0, hy, cx1 - cx0, HEAD_H);
