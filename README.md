@@ -304,6 +304,8 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 * Letter, Legal, Tabloid, A4 or A3, landscape or portrait, the whole project or a date range, headings on every page.
 * **Print…** opens the PDF in your viewer to print it; **Save as PDF…** keeps it. It's vector output in the PDF's standard fonts, so a 300-task plan is a few hundred KB.
 
+![A printed page: the table's first columns, Gantt bars in the file's styles, links and the timescale](docs/print.png)
+
 **Task calendars** (Project's base calendars)
 
 * **Change Working Time** now manages several calendars: the project calendar plus any you create, from a copy of the project calendar or from Project's *Standard*, *24 Hours* and *Night Shift*. Rename, edit the work week and exceptions, or delete them.
@@ -311,10 +313,14 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 * With resources, the task works only when both its calendar and each resource's calendar do (Project's rule), unless **Scheduling ignores resource calendars** is ticked. A task whose calendar and resources share no time is reported.
 * Task calendars travel through Project XML, which was the main cause of imported plans landing on different dates.
 
+![Change Working Time with a second calendar, Plant (Sat shifts): the month previews the work week as you edit it](docs/calendars.png)
+
 **Custom fields** (Project ▸ Custom Fields)
 
 * **Text1–10, Number1–10, Flag1–10, Date1–10 and Cost1–10** on every task. Rename any of them ("Team", "Risk"), add them as columns, type values in. Values are typed: numbers sort and filter as numbers, flags are Yes/No, dates are dates.
 * They work in custom filters, Group By (*by field*) and print, and travel through Project XML as Project's own custom fields (its field IDs, aliases and value formats), so they open in Project with the same names.
+
+![Custom fields renamed Team, Risk and Approved as columns, with Group By Team](docs/custom.png)
 
 **Bugs found by a review of the core** (12, all fixed and pinned by `tests/core_regressions.rs`)
 
@@ -412,7 +418,7 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 ## Building from source
 
 ```sh
-cargo test                          # 346 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, invariants, UI (headless)
+cargo test                          # 354 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, invariants, UI (headless)
 cargo test --release --test perf -- --ignored --nocapture   # timings on 500–5,000-task projects
 cargo run --release -- --sample
 ./packaging/build-appimage.sh       # → dist/ProjectFCG-x86_64.AppImage
