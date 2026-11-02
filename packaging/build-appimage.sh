@@ -10,6 +10,11 @@ TOOLS="${TOOLS:-$ROOT/../tools}"
 APPIMAGETOOL="${APPIMAGETOOL:-$TOOLS/appimagetool}"
 RUNTIME="${APPIMAGE_RUNTIME:-$TOOLS/runtime-x86_64}"
 OUT="${OUT:-$ROOT/dist}"
+# Update information embedded in the AppImage, so Gear Lever (and
+# AppImageUpdate) know where new versions come from, e.g.
+#   gh-releases-zsync|AnonyMap|ProjectFCG|latest|ProjectFCG-*-linux-x86_64.AppImage.zsync
+# The release workflow sets it; local builds leave it out.
+UPDATE_INFO="${UPDATE_INFO:-}"
 
 cd "$ROOT"
 cargo build --release
@@ -29,7 +34,11 @@ ln -sf projectfcg.png "$APPDIR/.DirIcon"
 
 mkdir -p "$OUT"
 # appimagetool is itself an AppImage; extract-and-run avoids needing FUSE here.
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "$APPIMAGETOOL" --no-appstream \
+UPD=()
+if [ -n "$UPDATE_INFO" ]; then
+    UPD=(--updateinformation "$UPDATE_INFO")
+fi
+APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 "$APPIMAGETOOL" --no-appstream "${UPD[@]}" \
     --runtime-file "$RUNTIME" "$APPDIR" "$OUT/ProjectFCG-x86_64.AppImage"
 chmod +x "$OUT/ProjectFCG-x86_64.AppImage"
 ls -la "$OUT/ProjectFCG-x86_64.AppImage"
