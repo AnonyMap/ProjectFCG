@@ -185,6 +185,11 @@ fn file_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             app.execute(Command::NewFromAgileSample, &ctx);
         }
     });
+    group(ui, "Print", |ui| {
+        if big(ui, "🖶", "Print…", "Print the view, or save it as a PDF (Ctrl+P)", true) {
+            app.execute(Command::PrintDlg, &ctx);
+        }
+    });
     group(ui, "Share", |ui| {
         if big(ui, "📤", "Save as\nXML", "Save as Microsoft Project XML (opens in Project, ProjectLibre, …). Open reads .xml files too.", true) {
             app.execute(Command::ExportXml, &ctx);

@@ -154,16 +154,18 @@ impl Duration {
         if num_str.is_empty() {
             return Err(format!("\"{text}\" is not a valid duration"));
         }
-        let value: f64 = num_str
-            .parse()
-            .map_err(|_| format!("\"{text}\" is not a valid duration"))?;
+        let value: f64 = parse_number(&num_str).ok_or_else(|| format!("\"{text}\" is not a valid duration"))?;
         if value < 0.0 {
             return Err("Duration can't be negative".into());
         }
         let unit_str = t[num_end..].trim().to_ascii_lowercase();
         let (unit, elapsed) = parse_unit(&unit_str, default_unit)
             .ok_or_else(|| format!("\"{text}\" is not a valid duration unit"))?;
-        let minutes = (value * s.unit_minutes(unit, elapsed)).round() as i64;
+        let raw = value * s.unit_minutes(unit, elapsed);
+        if raw > MAX_MINUTES as f64 {
+            return Err(format!("\"{text}\" is too long: durations go up to about a century."));
+        }
+        let minutes = raw.round() as i64;
         Ok(Duration {
             minutes,
             unit,
@@ -247,10 +249,7 @@ impl Lag {
             (false, t)
         };
         if let Some(p) = body.strip_suffix('%') {
-            let v: f64 = p
-                .trim()
-                .parse()
-                .map_err(|_| format!("\"{text}\" is not a valid lag"))?;
+            let v: f64 = parse_number(p).filter(|v| v.abs() <= 100_000.0).ok_or_else(|| format!("\"{text}\" is not a valid lag"))?;
             return Ok(Lag::Percent(if neg { -v } else { v }));
         }
         let d = Duration::parse(body, s, DurUnit::Day)?;
@@ -302,6 +301,16 @@ impl fmt::Display for DurUnit {
         };
         f.write_str(s)
     }
+}
+
+/// The longest duration or lag accepted: a century of elapsed time. (Far
+/// beyond any plan; much more and date arithmetic overflows.)
+pub const MAX_MINUTES: i64 = 100 * 366 * 1440;
+
+/// A number as typed: finite, and not absurdly large. ("NaN" and "inf"
+/// parse as floats but can't be saved.)
+pub fn parse_number(s: &str) -> Option<f64> {
+    s.trim().parse::<f64>().ok().filter(|v| v.is_finite() && v.abs() < 1e12)
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ pub mod inspector;
 pub mod interchange;
 pub mod sprint_dialogs;
 pub mod prefs;
+pub mod print;
 pub mod release_dialogs;
 pub mod resource_dialogs;
 pub mod resource_sheet;
@@ -228,6 +229,8 @@ pub struct ProjectFcgApp {
 
     pub active_row: RowRef,
     pub active_col: usize,
+    /// Whole rows are selected (row header, Shift+Space, Select All), not cells.
+    pub row_selected: bool,
     pub selected: Vec<u32>,
     pub anchor: Option<u32>,
     pub edit: Option<CellEdit>,
@@ -246,6 +249,8 @@ pub struct ProjectFcgApp {
     pub dialogs: dialogs::Dialogs,
     pub gantt_state: gantt::GanttState,
     pub clipboard: Vec<Task>,
+    /// Assignments of the copied tasks (pasted with them, as in Project).
+    pub clipboard_assignments: Vec<crate::model::Assignment>,
     pub ensure_visible: Option<usize>,
     /// Column the table last scrolled into view; when `active_col`
     /// differs, the table scrolls horizontally to show it.
@@ -273,6 +278,8 @@ pub struct ProjectFcgApp {
     pub last_view_rect: egui::Rect,
     /// Copy Picture's progress.
     pub picture: Picture,
+    /// File ▸ Print settings (this session).
+    pub print_options: print::PrintOptions,
     pub sheet: resource_sheet::SheetState,
     pub board: board::BoardState,
     pub usage: usage::UsageState,
@@ -314,6 +321,7 @@ impl ProjectFcgApp {
             },
             active_row: RowRef::Blank,
             active_col: name_col,
+            row_selected: false,
             selected: vec![],
             anchor: None,
             edit: None,
@@ -328,6 +336,7 @@ impl ProjectFcgApp {
             dialogs: dialogs::Dialogs::default(),
             gantt_state: gantt::GanttState::default(),
             clipboard: vec![],
+            clipboard_assignments: vec![],
             ensure_visible: None,
             shown_col: name_col,
             last_title: String::new(),
@@ -346,6 +355,7 @@ impl ProjectFcgApp {
             last_gantt_rect: egui::Rect::NOTHING,
             last_view_rect: egui::Rect::NOTHING,
             picture: Picture::None,
+            print_options: Default::default(),
             sheet: resource_sheet::SheetState::default(),
             board: board::BoardState::default(),
             usage: usage::UsageState::default(),
@@ -401,8 +411,9 @@ impl ProjectFcgApp {
         let before = self.project.clone();
         match f(&mut self.project) {
             Ok(v) => {
-                self.history.checkpoint(label, &before, &self.project);
-                self.dirty = true;
+                if self.history.checkpoint(label, &before, &self.project) {
+                    self.dirty = true;
+                }
                 self.recalc();
                 self.set_status(label);
                 Some(v)
@@ -741,6 +752,7 @@ impl ProjectFcgApp {
             filebrowser::Mode::ExportCsv => ("csv", "CSV", format!("{}.csv", self.project.title)),
             filebrowser::Mode::ExportJiraCsv => ("csv", "CSV", format!("{} - Jira.csv", self.project.title)),
             filebrowser::Mode::ExportXml => ("xml", "MS Project XML", format!("{}.xml", self.project.title)),
+            filebrowser::Mode::ExportPdf => ("pdf", "PDF", format!("{}.pdf", self.project.title)),
             filebrowser::Mode::ExportPng => ("png", "PNG image", format!("{} - {}.png", self.project.title, self.view.main.label())),
             _ => (
                 crate::io::EXTENSION,
@@ -754,6 +766,7 @@ impl ProjectFcgApp {
                 .set_title(match purpose {
                     filebrowser::Mode::SaveAs => "Save As",
                     filebrowser::Mode::ExportXml => "Save as Project XML",
+                    filebrowser::Mode::ExportPdf => "Save as PDF",
                     filebrowser::Mode::ExportPng => "Copy Picture",
                     _ => "Export",
                 })
@@ -795,6 +808,14 @@ impl ProjectFcgApp {
                 match std::fs::write(&path, crate::mspdi::to_xml(&self.project)) {
                     Ok(()) => self.set_status(format!("Saved {} as Project XML", path.display())),
                     Err(e) => self.error(format!("Couldn't save: {e}")),
+                }
+            }
+            filebrowser::Mode::ExportPdf => {
+                let path = if path.extension().is_none() { path.with_extension("pdf") } else { path };
+                let pdf = print::print_pdf(self, &self.print_options);
+                match std::fs::write(&path, pdf) {
+                    Ok(()) => self.set_status(format!("Saved {}", path.display())),
+                    Err(e) => self.error(format!("Couldn't save the PDF: {e}")),
                 }
             }
             filebrowser::Mode::ExportPng => {
@@ -865,6 +886,11 @@ impl ProjectFcgApp {
                 _ => {}
             }
         }
+        if cmd == DeleteKey {
+            let on_name = self.columns.get(self.active_col).is_some_and(|c| c.id == ColumnId::Name);
+            let sheet = self.view.main == MainView::Gantt || self.view.main == MainView::TaskUsage;
+            return self.execute(if !sheet || on_name || self.row_selected { DeleteTasks } else { ResetField }, ctx);
+        }
         // On the Board, row commands act on tickets.
         if self.view.main == MainView::Board {
             match cmd {
@@ -899,6 +925,8 @@ impl ProjectFcgApp {
             ExportCsv => self.pick_save(filebrowser::Mode::ExportCsv),
             ExportJiraCsv => self.pick_save(filebrowser::Mode::ExportJiraCsv),
             ExportXml => self.pick_save(filebrowser::Mode::ExportXml),
+            PrintDlg => self.open_print_dialog(),
+            SavePdf => self.pick_save(filebrowser::Mode::ExportPdf),
             ImportJiraCsv => self.pick_open_for(filebrowser::Mode::ImportJiraCsv),
             Options => self.dialogs.open_options(&self.project),
             Quit => self.guarded(PendingAction::Quit, ctx),
@@ -948,10 +976,13 @@ impl ProjectFcgApp {
             EditCell => self.begin_edit(None),
             SelectAll => {
                 self.selected = self.project.tasks.iter().map(|t| t.uid).collect();
+                self.row_selected = true;
             }
+            DeleteKey => {} // routed above
             SelectRow => {
                 if let RowRef::Task(u) = self.active_row {
                     self.selected = vec![u];
+                    self.row_selected = true;
                 }
             }
             Find => self.dialogs.find_open = true,
@@ -1670,6 +1701,8 @@ impl ProjectFcgApp {
             }
         }
         self.clipboard = idxs.iter().map(|&i| self.project.tasks[i].clone()).collect();
+        let uids: std::collections::HashSet<u32> = self.clipboard.iter().map(|t| t.uid).collect();
+        self.clipboard_assignments = self.project.assignments.iter().filter(|a| uids.contains(&a.task)).cloned().collect();
         // Also put a tab-separated version on the system clipboard.
         let mut tsv = String::new();
         for &i in &idxs {
@@ -1688,6 +1721,7 @@ impl ProjectFcgApp {
         }
         let at = self.active_index().unwrap_or(self.project.tasks.len());
         let clip = self.clipboard.clone();
+        let clip_asg = self.clipboard_assignments.clone();
         if let Some(first) = self.edit_project("Paste", move |p| {
             let base_level = if at < p.tasks.len() {
                 p.tasks[at].outline_level
@@ -1711,11 +1745,25 @@ impl ProjectFcgApp {
                     .iter()
                     .filter_map(|l| map.get(&l.pred).map(|&u| crate::model::Link { pred: u, ..*l }))
                     .collect();
+                // a pasted recurring series owns the pasted occurrences
+                if let Some(r) = nt.recurrence.as_mut() {
+                    r.occurrences = r.occurrences.iter().filter_map(|u| map.get(u).copied()).collect();
+                }
             }
-            for (k, nt) in new_tasks.into_iter().enumerate() {
-                p.tasks.insert(at + k, nt);
+            // one splice, not an insert per task (pasting thousands of rows)
+            let at = at.min(p.tasks.len());
+            p.tasks.splice(at..at, new_tasks);
+            // the resources go with the work, if they still exist
+            for a in &clip_asg {
+                if let Some(&nu) = map.get(&a.task) {
+                    if p.resources.iter().any(|r| r.uid == a.resource) {
+                        p.assignments.push(crate::model::Assignment { task: nu, ..a.clone() });
+                    }
+                }
             }
             p.normalize_outline();
+            // the paste can put a task under one it was linked to
+            p.sanitize_links();
             Ok(at)
         }) {
             self.select_index(first);
@@ -1854,6 +1902,10 @@ impl ProjectFcgApp {
 
     /// Move the active cell by rows (in display order) and columns.
     pub fn move_active(&mut self, drow: i32, dcol: i32, extend: bool) {
+        // moving between cells selects cells again (Shift+arrows extends rows)
+        if !extend {
+            self.row_selected = false;
+        }
         let rows = self.display_rows();
         let task_rows: Vec<usize> = rows
             .iter()
@@ -1990,6 +2042,7 @@ impl ProjectFcgApp {
         sprint_dialogs::show_all(self, &ctx);
         view_dialogs::show_all(self, &ctx);
         release_dialogs::show_all(self, &ctx);
+        print::show_dialog(self, &ctx);
         self.check_filters();
         if let Some(mut fb) = self.file_browser.take() {
             match fb.show(&ctx) {

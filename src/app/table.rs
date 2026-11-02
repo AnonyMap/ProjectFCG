@@ -122,6 +122,8 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
                     if let Some(k) = col {
                         app.active_col = k;
                     }
+                    // the row header selects whole rows; a cell selects cells
+                    app.row_selected = col.is_none();
                     let uid = match r {
                         RowRef::Task(u) => Some(u),
                         RowRef::Blank => None,

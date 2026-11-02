@@ -178,7 +178,12 @@ impl Project {
             self.set_duration(row, d)?;
             return self.set_percent_complete(row, 100.0);
         }
-        let pct = if dur > 0 { minutes as f64 / dur as f64 * 100.0 } else { 100.0 };
+        if dur == 0 {
+            // a milestone with no actual time: its progress doesn't change
+            // (marking it done is % Complete's job)
+            return Ok(());
+        }
+        let pct = minutes as f64 / dur as f64 * 100.0;
         self.set_percent_complete(row, (pct * 100.0).round() / 100.0)
     }
 
@@ -258,18 +263,31 @@ impl Project {
             }
         }
         if let Some(after) = reschedule_after {
-            for row in 0..self.tasks.len() {
-                let t = &self.tasks[row];
-                if t.calc.is_summary || t.actual_start.is_some() || t.mode != crate::model::TaskMode::Auto {
-                    continue;
-                }
-                if t.calc.start.is_some_and(|s| s < after) && self.set_constraint(row, crate::model::ConstraintType::SNET, Some(after)).is_ok() {
-                    changed.push(row);
-                }
-            }
+            changed.extend(self.reschedule_uncompleted(after, rows));
         }
         changed.sort();
         changed.dedup();
+        changed
+    }
+
+    /// Update Project ▸ Reschedule uncompleted work to start after: unstarted
+    /// auto-scheduled tasks (all, or `rows`) that would start earlier get a
+    /// Start No Earlier Than `after`.
+    pub fn reschedule_uncompleted(&mut self, after: NaiveDateTime, rows: Option<&[usize]>) -> Vec<usize> {
+        let targets: Vec<usize> = match rows {
+            Some(r) => r.iter().copied().filter(|&i| i < self.tasks.len()).collect(),
+            None => (0..self.tasks.len()).collect(),
+        };
+        let mut changed = vec![];
+        for row in targets {
+            let t = &self.tasks[row];
+            if t.calc.is_summary || t.actual_start.is_some() || t.mode != crate::model::TaskMode::Auto {
+                continue;
+            }
+            if t.calc.start.is_some_and(|s| s < after) && self.set_constraint(row, crate::model::ConstraintType::SNET, Some(after)).is_ok() {
+                changed.push(row);
+            }
+        }
         changed
     }
 

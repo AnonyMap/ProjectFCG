@@ -368,6 +368,9 @@ impl Project {
             return Err("The duration of a summary task is calculated from its subtasks.".into());
         }
         let has_work = !self.work_assignments(row).is_empty();
+        if has_work && d.minutes == 0 && self.tasks[row].task_type == crate::model::TaskType::FixedWork && self.tasks[row].calc.work > 0 {
+            return Err("A Fixed Work task needs time to do its work. Change the task type, or remove the work, to make it a milestone.".into());
+        }
         let elapsed = d.elapsed;
         self.tasks[row].duration = d;
         if has_work && !elapsed {
@@ -411,12 +414,11 @@ impl Project {
                 if dt < s {
                     return Err("The finish date can't be earlier than the start date.".into());
                 }
-                t.duration.minutes = if t.duration.elapsed {
-                    (dt - s).num_minutes()
-                } else {
-                    cal.work_between(s, dt)
-                };
-                t.duration.estimated = false;
+                let mut d = t.duration;
+                d.minutes = if d.elapsed { (dt - s).num_minutes() } else { cal.work_between(s, dt) };
+                d.estimated = false;
+                // through set_duration, so assigned work follows the new length
+                return self.set_duration(row, d);
             }
             TaskMode::Auto => {
                 t.constraint = ConstraintType::FNET;
@@ -610,12 +612,7 @@ impl Project {
             }
             Field::Predecessors => self.set_predecessors_text(row, text),
             Field::PercentComplete => {
-                let v: f64 = text
-                    .trim()
-                    .trim_end_matches('%')
-                    .trim()
-                    .parse()
-                    .map_err(|_| format!("\"{text}\" is not a valid percentage"))?;
+                let v: f64 = crate::duration::parse_number(text.trim().trim_end_matches('%')).ok_or_else(|| format!("\"{text}\" is not a valid percentage"))?;
                 self.set_percent_complete(row, v)
             }
             Field::ResourceNames => self.set_resource_names_text(row, text),

@@ -658,6 +658,9 @@ pub fn set_cell(p: &mut Project, row: usize, col: ColumnId, text: &str) -> Resul
         }
         ColumnId::LevelingDelay => {
             let d = p.parse_duration(txt)?;
+            if d.elapsed {
+                return Err("Leveling delay is working time: type it as days or hours (3d, not 3ed).".into());
+            }
             if p.is_summary(row) {
                 return Err("Leveling delay applies to subtasks.".into());
             }
@@ -683,6 +686,14 @@ pub fn set_cell(p: &mut Project, row: usize, col: ColumnId, text: &str) -> Resul
                 return Err("Enter actuals on subtasks; summaries roll them up.".into());
             }
             let d = p.parse_duration(txt)?;
+            // actuals are in the task's own kind of time
+            if d.elapsed != p.tasks[row].duration.elapsed {
+                return Err(if d.elapsed {
+                    "This task's duration is working time, so its actuals are too: type 3d, not 3ed.".into()
+                } else {
+                    "This task's duration is elapsed time, so its actuals are too: type 3ed.".into()
+                });
+            }
             if col == ColumnId::ActualDuration {
                 p.set_actual_duration(row, d.minutes)
             } else {

@@ -159,6 +159,7 @@ pub struct Dialogs {
     pub custom_group: Option<super::view_dialogs::CustomGroupDlg>,
     pub release: Option<super::release_dialogs::ReleaseDlg>,
     pub release_version: Option<super::release_dialogs::ReleaseVersionDlg>,
+    pub print: Option<super::print::PrintDlg>,
 }
 
 impl Dialogs {
@@ -194,6 +195,7 @@ impl Dialogs {
             || self.custom_group.is_some()
             || self.release.is_some()
             || self.release_version.is_some()
+            || self.print.is_some()
             || self.update_tasks.is_some()
             || self.update_project.is_some()
             || self.statistics
@@ -806,7 +808,7 @@ fn task_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                 let rtype = p.resources[ri].rtype;
                 let v = match rtype {
                     crate::model::ResourceType::Work => crate::resources::parse_units(&a.units)?,
-                    crate::model::ResourceType::Material => a.units.trim().parse::<f64>().map_err(|_| format!("\"{}\" is not a quantity", a.units))?,
+                    crate::model::ResourceType::Material => crate::duration::parse_number(&a.units).ok_or_else(|| format!("\"{}\" is not a quantity", a.units))?,
                     crate::model::ResourceType::Cost => crate::resources::parse_money(&a.units, &sym)?,
                 };
                 let ai = p.assign(row, a.res_uid, v)?;

@@ -742,17 +742,17 @@ fn parse_amount(s: &str, currency: &str) -> Result<ParsedAmount, String> {
         return Ok(ParsedAmount::Default);
     }
     if let Some(p) = s.strip_suffix('%') {
-        return p.trim().replace(',', "").parse::<f64>().map(ParsedAmount::Percent).map_err(|_| bad());
+        return crate::duration::parse_number(&p.trim().replace(',', "")).map(ParsedAmount::Percent).ok_or_else(bad);
     }
     if let Some(m) = s.strip_prefix(currency).or_else(|| s.strip_prefix('$')) {
-        return m.trim().replace(',', "").parse::<f64>().map(ParsedAmount::Money).map_err(|_| bad());
+        return crate::duration::parse_number(&m.trim().replace(',', "")).map(ParsedAmount::Money).ok_or_else(bad);
     }
     let num_end = s
         .char_indices()
         .find(|(_, c)| !(c.is_ascii_digit() || *c == '.' || *c == ','))
         .map(|(i, _)| i)
         .unwrap_or(s.len());
-    let q: f64 = s[..num_end].replace(',', "").parse().map_err(|_| bad())?;
+    let q: f64 = crate::duration::parse_number(&s[..num_end].replace(',', "")).ok_or_else(bad)?;
     let label = s[num_end..].trim();
     Ok(ParsedAmount::Quantity(q, if label.is_empty() { None } else { Some(label.to_string()) }))
 }
@@ -766,7 +766,7 @@ pub fn fmt_units(u: f64) -> String {
 /// percentages, as Project displays units as percentages by default).
 pub fn parse_units(s: &str) -> Result<f64, String> {
     let t = s.trim().trim_end_matches('%').trim();
-    let v: f64 = t.parse().map_err(|_| format!("\"{s}\" is not a valid percentage"))?;
+    let v: f64 = crate::duration::parse_number(t).ok_or_else(|| format!("\"{s}\" is not a valid percentage"))?;
     if v < 0.0 {
         return Err("Units can't be negative.".into());
     }
@@ -793,7 +793,7 @@ pub fn fmt_money(v: f64, sym: &str) -> String {
 pub fn parse_money(s: &str, sym: &str) -> Result<f64, String> {
     let t = s.trim();
     let t = t.strip_prefix(sym).or_else(|| t.strip_prefix('$')).unwrap_or(t);
-    t.trim().replace(',', "").parse::<f64>().map_err(|_| format!("\"{s}\" is not a valid amount"))
+    crate::duration::parse_number(&t.trim().replace(',', "")).ok_or_else(|| format!("\"{s}\" is not a valid amount"))
 }
 
 /// Rates: "$50.00/hr". `per_hour` is the stored value.

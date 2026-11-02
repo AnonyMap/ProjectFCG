@@ -87,6 +87,13 @@ pub fn category_for(app: &ProjectFcgApp, i: usize) -> BarCategory {
 /// Effective style for the main bar, after per-task colour and Task Path
 /// overrides.
 pub fn style_for(app: &ProjectFcgApp, i: usize, role: Option<PathRole>) -> (BarCategory, BarStyle) {
+    let (cat, st) = file_style_for(app, i, role);
+    (cat, adapt_style(st, cat))
+}
+
+/// The main bar's style as the file defines it (no theme adaptation):
+/// what printing uses, on white paper.
+pub fn file_style_for(app: &ProjectFcgApp, i: usize, role: Option<PathRole>) -> (BarCategory, BarStyle) {
     let t = &app.project.tasks[i];
     let f = &app.project.format;
     let cat = category_for(app, i);
@@ -108,7 +115,7 @@ pub fn style_for(app: &ProjectFcgApp, i: usize, role: Option<PathRole>) -> (BarC
             st.pattern = Pattern::Solid;
         }
     }
-    (cat, adapt_style(st, cat))
+    (cat, st)
 }
 
 /// Pixel half-height of a style's bar.

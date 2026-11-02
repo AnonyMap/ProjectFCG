@@ -1843,6 +1843,7 @@ dependencies = [
  "chrono",
  "eframe",
  "egui",
+ "miniz_oxide 0.8.9",
  "png",
  "rfd",
  "roxmltree",
