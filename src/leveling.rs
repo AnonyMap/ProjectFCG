@@ -308,7 +308,7 @@ fn rebook(p: &Project, r: usize, ridx: &HashMap<u32, usize>, book: &mut Book) {
             v.retain(|x| x.0 != r);
         }
         let Some(&ri) = ridx.get(&a.resource) else { continue };
-        if let Some((s, f)) = crate::resources::assignment_dates(p, &p.calc.resource_calendars, ai, r, ri) {
+        if let Some((s, f)) = crate::resources::assignment_dates(p, p.assignment_calendar(ai, ri), ai, r, ri) {
             if f > s {
                 book.entry(a.resource).or_default().push((r, (s, f, a.units)));
             }
@@ -437,20 +437,20 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
                 stale = false;
                 dirty = false;
             }
-            let my: Vec<(usize, u32, f64, i64)> = p
+            let my: Vec<(usize, u32, f64, i64, usize)> = p
                 .work_assignments(t)
                 .into_iter()
                 .filter(|&ai| p.assignments[ai].units > 1e-9)
                 .filter_map(|ai| {
                     let a = &p.assignments[ai];
                     let ri = p.resource_index(a.resource)?;
-                    (p.resources[ri].rtype == ResourceType::Work).then(|| (ri, a.resource, a.units, p.assignment_span(ai)))
+                    (p.resources[ri].rtype == ResourceType::Work).then(|| (ri, a.resource, a.units, p.assignment_span(ai), ai))
                 })
                 .collect();
             processed[t] = true;
             let Some(s0) = p.tasks[t].calc.start else { continue };
             // impossible: assignment needs more than the resource has
-            if let Some(&(ri, _, u, _)) = my.iter().find(|&&(ri, _, u, _)| u > p.resources[ri].max_units + 1e-6) {
+            if let Some(&(ri, _, u, _, _)) = my.iter().find(|&&(ri, _, u, _, _)| u > p.resources[ri].max_units + 1e-6) {
                 result.unresolved.push(format!(
                     "{} is assigned at {} to \"{}\" but has a maximum of {}.",
                     p.resources[ri].name,
@@ -462,8 +462,8 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
                 continue;
             }
             let fits = |c: NaiveDateTime| -> bool {
-                my.iter().all(|&(ri, ru, u, span)| {
-                    let cal = &p.calc.resource_calendars[ri];
+                my.iter().all(|&(ri, ru, u, span, ai)| {
+                    let cal = p.assignment_calendar(ai, ri);
                     let a = cal.next_working_start(c);
                     let b = cal.add_work(a, span);
                     let load = book.get(&ru).map(|bk| peak_load(bk, a, b)).unwrap_or(0.0);
@@ -471,7 +471,7 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
                 })
             };
             let mut tries: Vec<NaiveDateTime> = vec![s0];
-            for &(_, ru, _, _) in &my {
+            for &(_, ru, _, _, _) in &my {
                 if let Some(bk) = book.get(&ru) {
                     tries.extend(bk.iter().map(|b| (b.1).1).filter(|&f| f > s0));
                 }
@@ -556,9 +556,9 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
 }
 
 /// Record a placed task's bookings (as the scheduler will place them).
-fn place(p: &Project, my: &[(usize, u32, f64, i64)], at: NaiveDateTime, book: &mut Book, row: usize) {
-    for &(ri, ru, u, span) in my {
-        let cal = &p.calc.resource_calendars[ri];
+fn place(p: &Project, my: &[(usize, u32, f64, i64, usize)], at: NaiveDateTime, book: &mut Book, row: usize) {
+    for &(ri, ru, u, span, ai) in my {
+        let cal = p.assignment_calendar(ai, ri);
         let a = cal.next_working_start(at);
         let b = cal.add_work(a, span);
         if b > a {

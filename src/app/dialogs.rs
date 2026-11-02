@@ -1321,7 +1321,7 @@ fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         }
     }
     if create {
-        let used = app.project.calendars.iter().map(|c| c.uid).max();
+        let used = app.project.calendars.iter().map(|c| c.uid).chain(app.project.tasks.iter().filter_map(|t| t.calendar)).max();
         if let Err(e) = st.create(used) {
             st.error = Some(e);
         }

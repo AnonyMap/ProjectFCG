@@ -147,28 +147,56 @@ impl Calendar {
     /// Working time both calendars have: a task with its own calendar,
     /// done by a resource with another, works when both do (Project's rule
     /// unless "Scheduling ignores resource calendars"). Days either one
-    /// has an exception for become exception days of the result.
+    /// has an exception for become exceptions of the result.
+    ///
+    /// Exceptions are intersected as ranges: between consecutive exception
+    /// boundaries each calendar is either inside one exception (fixed
+    /// shifts) or on its weekly pattern, so the result repeats weekly
+    /// there. A stretch that is the same every weekday (a year away: no
+    /// work) stays one exception, however long; only a stretch that varies
+    /// by weekday is written out day by day, merging runs.
     pub fn intersect(&self, other: &Calendar) -> Calendar {
         let week = std::array::from_fn(|d| intersect_shifts(&self.week[d], &other.week[d]));
-        let mut days: Vec<NaiveDate> = vec![];
+        let mut cuts: Vec<NaiveDate> = vec![];
         for e in self.exceptions.iter().chain(&other.exceptions) {
-            let mut d = e.start;
-            // long ranges (a year off) stay bounded
-            for _ in 0..3700 {
-                if d > e.end {
-                    break;
+            if e.end < e.start {
+                continue;
+            }
+            cuts.push(e.start);
+            cuts.push(e.end.succ_opt().unwrap_or(e.end));
+        }
+        cuts.sort();
+        cuts.dedup();
+        let mut exceptions: Vec<CalendarException> = vec![];
+        let mut push = |d0: NaiveDate, d1: NaiveDate, shifts: Vec<Shift>| match exceptions.last_mut() {
+            Some(last) if last.shifts == shifts && last.end.succ_opt() == Some(d0) => last.end = d1,
+            _ => exceptions.push(CalendarException { name: String::new(), start: d0, end: d1, shifts }),
+        };
+        for w in cuts.windows(2) {
+            let (a, Some(b)) = (w[0], w[1].pred_opt()) else { continue };
+            if !self.in_exception(a) && !other.in_exception(a) {
+                continue;
+            }
+            let days = (b - a).num_days() + 1;
+            let day = |k: i64| {
+                let d = a + chrono::Duration::days(k);
+                (d, intersect_shifts(self.shifts_on(d), other.shifts_on(d)))
+            };
+            let first: Vec<Vec<Shift>> = (0..days.min(7)).map(|k| day(k).1).collect();
+            if first.iter().all(|s| *s == first[0]) {
+                push(a, b, first[0].clone());
+            } else {
+                for k in 0..days {
+                    let (d, s) = day(k);
+                    push(d, d, s);
                 }
-                days.push(d);
-                d = d.succ_opt().unwrap_or(d);
             }
         }
-        days.sort();
-        days.dedup();
-        let exceptions = days
-            .into_iter()
-            .map(|d| CalendarException { name: String::new(), start: d, end: d, shifts: intersect_shifts(self.shifts_on(d), other.shifts_on(d)) })
-            .collect();
         Calendar { name: format!("{} ∩ {}", self.name, other.name), week, exceptions }
+    }
+
+    fn in_exception(&self, date: NaiveDate) -> bool {
+        self.exceptions.iter().any(|ex| date >= ex.start && date <= ex.end)
     }
 
     pub fn shifts_on(&self, date: NaiveDate) -> &[Shift] {

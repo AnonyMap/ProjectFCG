@@ -504,10 +504,8 @@ impl Project {
         if hi <= lo || asg.work <= 0 {
             return 0.0;
         }
-        let cal = self
-            .resource_index(asg.resource)
-            .and_then(|i| self.calc.resource_calendars.get(i))
-            .unwrap_or(&self.calendar);
+        let Some(ri) = self.resource_index(asg.resource) else { return 0.0 };
+        let cal = self.assignment_calendar(ai, ri);
         let full = cal.work_between(s, f);
         if full <= 0 {
             return 0.0;
@@ -519,9 +517,10 @@ impl Project {
 /// After scheduling: assignment dates on resource calendars, costs,
 /// overallocation, and work/cost rollups.
 /// When assignment `ai` (of task row `ti`, resource index `ri`) works: work
-/// resources run their span on their own calendar from the task's start;
+/// resources run their span on the assignment's calendar (the resource's,
+/// ∩ the task's own calendar if it has one) from the task's start;
 /// material and cost resources span the task.
-pub(crate) fn assignment_dates(p: &Project, cals: &[Calendar], ai: usize, ti: usize, ri: usize) -> Option<(NaiveDateTime, NaiveDateTime)> {
+pub(crate) fn assignment_dates(p: &Project, cal: &Calendar, ai: usize, ti: usize, ri: usize) -> Option<(NaiveDateTime, NaiveDateTime)> {
     let a = &p.assignments[ai];
     let t = &p.tasks[ti];
     let (Some(s), Some(f)) = (t.calc.start, t.calc.finish) else { return None };
@@ -531,8 +530,8 @@ pub(crate) fn assignment_dates(p: &Project, cals: &[Calendar], ai: usize, ti: us
         if span == 0 {
             (s, s)
         } else {
-            let st = cals[ri].next_working_start(s);
-            (st, cals[ri].add_work(st, span))
+            let st = cal.next_working_start(s);
+            (st, cal.add_work(st, span))
         }
     } else {
         (s, f)
@@ -551,7 +550,8 @@ pub(crate) fn update_assignment_dates(p: &mut Project) {
         if p.tasks[ti].calc.is_summary {
             continue;
         }
-        if let Some((s, f)) = assignment_dates(p, &cals, ai, ti, ri) {
+        let ci = p.calc.assignment_cal.get(ai).copied().filter(|&c| c < cals.len()).unwrap_or(ri);
+        if let Some((s, f)) = assignment_dates(p, &cals[ci], ai, ti, ri) {
             p.calc.assignments[ai].start = Some(s);
             p.calc.assignments[ai].finish = Some(f);
         }
@@ -561,7 +561,7 @@ pub(crate) fn update_assignment_dates(p: &mut Project) {
 
 pub fn compute_resources(p: &mut Project) {
     use crate::model::{AssignmentCalc, ResourceCalc};
-    let cals = p.build_resource_calendars();
+    let (cals, asg_ci, task_ci) = p.build_calendar_index();
     let idx: std::collections::HashMap<u32, usize> = p.tasks.iter().enumerate().map(|(i, t)| (t.uid, i)).collect();
     let ridx: std::collections::HashMap<u32, usize> = p.resources.iter().enumerate().map(|(i, r)| (r.uid, i)).collect();
     let mut acalc: Vec<AssignmentCalc> = vec![AssignmentCalc::default(); p.assignments.len()];
@@ -572,7 +572,7 @@ pub fn compute_resources(p: &mut Project) {
         if t.calc.is_summary {
             continue;
         }
-        let Some((as_, af)) = assignment_dates(p, &cals, ai, ti, ri) else { continue };
+        let Some((as_, af)) = assignment_dates(p, &cals[asg_ci[ai]], ai, ti, ri) else { continue };
         let r = &p.resources[ri];
         let cost = match r.rtype {
             ResourceType::Work => a.work as f64 / 60.0 * r.std_rate + r.cost_per_use,
@@ -677,6 +677,8 @@ pub fn compute_resources(p: &mut Project) {
     p.calc.assignments = acalc;
     p.calc.resources = rcalc;
     p.calc.resource_calendars = cals;
+    p.calc.assignment_cal = asg_ci;
+    p.calc.task_cal = task_ci;
     p.calc.total_cost = total_cost;
     p.calc.total_work = total_work;
     crate::tracking::compute_tracking(p, &acost, &parents);

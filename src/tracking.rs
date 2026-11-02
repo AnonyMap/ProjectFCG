@@ -151,7 +151,7 @@ impl Project {
         if f < start {
             return Err("The actual finish can't be before the actual start.".into());
         }
-        let mins = self.task_calendar(row).work_between(start, f);
+        let mins = self.duration_calendar(row).work_between(start, f);
         if !self.tasks[row].duration.elapsed && mins != self.tasks[row].duration.minutes {
             let mut d = self.tasks[row].duration;
             d.minutes = mins.max(0);
@@ -226,7 +226,7 @@ impl Project {
         if at <= s {
             return 0.0;
         }
-        let cal = self.task_calendar(row);
+        let cal = self.scheduled_duration_calendar(row);
         let total = cal.work_between(s, f);
         if total <= 0 {
             return 100.0;
@@ -390,7 +390,7 @@ pub(crate) fn compute_tracking(p: &mut Project, acost: &[f64], parents: &[Option
             } else if status <= b.start {
                 0.0
             } else {
-                let cal = p.task_calendar(i);
+                let cal = p.scheduled_duration_calendar(i);
                 let total = cal.work_between(b.start, b.finish);
                 if total > 0 {
                     cal.work_between(b.start, status) as f64 / total as f64
@@ -442,7 +442,7 @@ pub fn progress_point(p: &Project, row: usize, at: NaiveDateTime) -> Option<Naiv
         return Some(at);
     }
     // the point reached by the work done
-    let cal = p.task_calendar(row);
+    let cal = p.scheduled_duration_calendar(row);
     let total = cal.work_between(s, f);
     let done = (total as f64 * pct / 100.0).round() as i64;
     Some(if done <= 0 { s } else { cal.add_work(cal.next_working_start(s), done) })

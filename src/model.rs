@@ -638,8 +638,16 @@ pub struct ProjectCalc {
     pub assignments: Vec<AssignmentCalc>,
     /// Parallel to `Project::resources`.
     pub resources: Vec<ResourceCalc>,
-    /// Effective calendar per resource (project calendar + its changes).
+    /// Effective calendar per resource (project calendar + its changes),
+    /// then the project calendar, base calendars, and resource ∩ task
+    /// calendar intersections (see `Project::build_calendar_index`).
     pub resource_calendars: Vec<crate::calendar::Calendar>,
+    /// Parallel to `Project::assignments`: index into `resource_calendars`
+    /// of the calendar the assignment works on.
+    pub assignment_cal: Vec<usize>,
+    /// Parallel to `Project::tasks`: index of the calendar the task's
+    /// duration is measured on.
+    pub task_cal: Vec<usize>,
     pub total_cost: f64,
     pub total_work: i64,
 }

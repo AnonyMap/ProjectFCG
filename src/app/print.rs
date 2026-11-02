@@ -379,7 +379,7 @@ pub fn print_pdf(app: &ProjectFcgApp, o: &PrintOptions) -> Vec<u8> {
                     pg.unclip();
                     if fmt.layout.show_bar_text {
                         let label = super::bars::bar_text(app, i, st.text.right);
-                        if !label.is_empty() && right_x + 3.0 < cx1 {
+                        if !label.is_empty() && right_x >= cx0 && right_x + 3.0 < cx1 {
                             pg.text(right_x + 3.0, base, &fit_text(&label, Font::Regular, FONT - 0.5, cx1 - right_x - 4.0), Font::Regular, FONT - 0.5, Rgb(60, 62, 70));
                         }
                     }

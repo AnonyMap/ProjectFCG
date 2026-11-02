@@ -72,3 +72,35 @@ fn prints_what_the_view_shows() {
         assert!(!t.contains("Database migration"), "not critical");
     }
 }
+
+#[test]
+fn bar_text_left_of_the_printed_dates_isnt_drawn() {
+    use chrono::NaiveDate;
+    use projectfcg::model::{ConstraintType, Project};
+    use projectfcg::ops::Field;
+    let mut p = Project::new(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
+    let a = p.append_task("Early");
+    p.set_field_text(a, Field::Duration, "2d").unwrap();
+    p.set_field_text(a, Field::ResourceNames, "Zebulon").unwrap();
+    let b = p.append_task("Late");
+    p.set_field_text(b, Field::Duration, "2d").unwrap();
+    p.set_constraint(b, ConstraintType::SNET, Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap().and_hms_opt(8, 0, 0).unwrap())).unwrap();
+    projectfcg::schedule::schedule(&mut p);
+    let app = ProjectFcgApp::new(p);
+    let range = Some((NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(), NaiveDate::from_ymd_opt(2026, 6, 30).unwrap()));
+    let pdf = print_pdf(&app, &PrintOptions { range, ..Default::default() });
+    // the page's drawing, inflated
+    let raw = &pdf[..];
+    let mut drawn = String::new();
+    let mut i = 0;
+    while let Some(k) = raw[i..].windows(10).position(|w| w == b">>\nstream\n") {
+        let s = i + k + 10;
+        let Some(e) = raw[s..].windows(10).position(|w| w == b"\nendstream").map(|e| s + e) else { break };
+        if let Ok(d) = miniz_oxide::inflate::decompress_to_vec_zlib(&raw[s..e]) {
+            drawn.push_str(&String::from_utf8_lossy(&d));
+        }
+        i = e;
+    }
+    assert!(drawn.contains("(Late)"), "the drawing was read");
+    assert!(!drawn.contains("Zebulon"), "Early's bar ends before the range, so its label isn't printed over the table");
+}

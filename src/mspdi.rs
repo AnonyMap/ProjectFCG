@@ -499,7 +499,7 @@ pub fn to_xml(p: &Project) -> String {
             use crate::custom_fields::CustomValue as V;
             let value = match v {
                 V::Text(s) => s.clone(),
-                V::Number(x) => format!("{}", (x * 100.0).round() / 100.0),
+                V::Number(x) => format!("{x}"),
                 // currency in hundredths, as Project writes custom costs
                 V::Cost(x) => format!("{}", (x * 100.0).round()),
                 V::Flag(b) => if *b { "1" } else { "0" }.to_string(),

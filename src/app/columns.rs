@@ -632,8 +632,9 @@ pub fn edit_text(p: &Project, row: usize, col: ColumnId) -> String {
         ColumnId::TaskCalendar => t.calendar.and_then(|u| p.base_calendar(u)).map(|c| c.name.clone()).unwrap_or_default(),
         ColumnId::Custom(f) => match (p.custom_value(row, f), f.kind) {
             (None, FieldKind::Number | FieldKind::Cost | FieldKind::Date | FieldKind::Text) => String::new(),
-            (Some(crate::custom_fields::CustomValue::Number(v)), _) => crate::duration::fmt_num(*v),
-            (Some(crate::custom_fields::CustomValue::Cost(v)), _) => crate::duration::fmt_num(*v),
+            // the full value, so Fill Down and copy don't round it
+            (Some(crate::custom_fields::CustomValue::Number(v)), _) => format!("{v}"),
+            (Some(crate::custom_fields::CustomValue::Cost(v)), _) => format!("{v}"),
             (Some(crate::custom_fields::CustomValue::Date(d)), _) => fmt_datetime(*d),
             _ => p.custom_text(row, f),
         },

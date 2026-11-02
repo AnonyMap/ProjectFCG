@@ -178,10 +178,11 @@ pub fn show_all(app: &mut ProjectFcgApp, ctx: &egui::Context) {
 
 fn field_combo(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, col: &mut ColumnId, width: f32, p: &Project) {
     egui::ComboBox::from_id_salt(id).selected_text(col.title_in(p)).width(width).height(360.0).show_ui(ui, |ui| {
+        let in_use = p.custom_fields_in_use();
         for c in ColumnId::filterable() {
             // unused, unnamed custom fields would only clutter the list
             if let ColumnId::Custom(f) = c {
-                if !p.custom_fields_in_use().contains(&f) && *col != c {
+                if !in_use.contains(&f) && *col != c {
                     continue;
                 }
             }

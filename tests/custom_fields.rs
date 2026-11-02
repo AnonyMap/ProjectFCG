@@ -116,3 +116,22 @@ fn project_xml_carries_them_with_projects_field_ids() {
     let (_, warnings) = projectfcg::mspdi::from_xml(&extra).unwrap();
     assert!(warnings.iter().any(|w| w.contains("Region")), "{warnings:?}");
 }
+
+#[test]
+fn numbers_keep_every_digit_through_fill_down_and_project_xml() {
+    use projectfcg::app::columns::edit_text;
+    let mut p = Project::new(NaiveDate::from_ymd_opt(2026, 1, 5).unwrap());
+    let a = p.append_task("A");
+    let b = p.append_task("B");
+    let col = f(FieldKind::Number, 1);
+    set_cell(&mut p, a, col, "0.125").unwrap();
+    let src = edit_text(&p, a, col);
+    set_cell(&mut p, b, col, &src).unwrap();
+    assert_eq!(p.tasks[b].custom.get("Number1"), Some(&CustomValue::Number(0.125)));
+    set_cell(&mut p, a, col, "0.001").unwrap();
+    set_cell(&mut p, b, f(FieldKind::Cost, 1), "0.125").unwrap();
+    projectfcg::schedule::schedule(&mut p);
+    let (q, _) = projectfcg::mspdi::from_xml(&projectfcg::mspdi::to_xml(&p)).unwrap();
+    assert_eq!(q.tasks[0].custom.get("Number1"), Some(&CustomValue::Number(0.001)));
+    assert_eq!(q.tasks[1].custom.get("Number1"), Some(&CustomValue::Number(0.125)));
+}

@@ -405,7 +405,7 @@ impl Project {
         if self.is_summary(row) {
             return Err("The finish of a summary task is calculated from its subtasks.".into());
         }
-        let cal = self.calendar.clone();
+        let cal = self.duration_calendar(row).into_owned();
         let start = self.tasks[row].calc.start;
         let t = &mut self.tasks[row];
         match t.mode {

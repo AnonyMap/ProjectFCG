@@ -1734,6 +1734,11 @@ impl ProjectFcgApp {
             let mut new_tasks = vec![];
             for t in &clip {
                 let mut nt = t.clone();
+                // its calendar may have been deleted since it was copied
+                if nt.calendar.is_some_and(|u| p.base_calendar(u).is_none()) {
+                    nt.calendar = None;
+                    nt.ignore_resource_calendars = false;
+                }
                 let nu = p.alloc_uid();
                 map.insert(t.uid, nu);
                 nt.uid = nu;
