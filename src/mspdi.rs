@@ -349,6 +349,13 @@ pub fn to_xml(p: &Project) -> String {
     write_calendar(&mut w, 1, &p.calendar.name, None, Some(&p.calendar.week), &p.calendar.exceptions);
     let mut res_cal: HashMap<u32, u32> = HashMap::new();
     let mut next_cal = 2;
+    // task calendars: base calendars in their own right
+    let mut base_cal: HashMap<u32, u32> = HashMap::new();
+    for bc in &p.calendars {
+        write_calendar(&mut w, next_cal, &bc.calendar.name, None, Some(&bc.calendar.week), &bc.calendar.exceptions);
+        base_cal.insert(bc.uid, next_cal);
+        next_cal += 1;
+    }
     for r in p.resources.iter().filter(|r| r.rtype == ResourceType::Work) {
         write_calendar(&mut w, next_cal, &r.name, Some(1), r.week.as_ref(), &r.exceptions);
         res_cal.insert(r.uid, next_cal);
@@ -371,6 +378,7 @@ pub fn to_xml(p: &Project) -> String {
     w.open("Tasks");
     for (i, t) in p.tasks.iter().enumerate() {
         let c = &t.calc;
+        let task_cal_uid: i64 = t.calendar.and_then(|u| base_cal.get(&u)).map(|&x| x as i64).unwrap_or(-1);
         w.open("Task");
         w.el("UID", t.uid.to_string());
         w.el("ID", (i + 1).to_string());
@@ -430,12 +438,12 @@ pub fn to_xml(p: &Project) -> String {
         match floor {
             Some(f) => {
                 w.el("ConstraintType", constraint_code(ConstraintType::SNET).to_string());
-                w.el("CalendarUID", "-1");
+                w.el("CalendarUID", task_cal_uid.to_string());
                 w.el("ConstraintDate", dt(f));
             }
             None => {
                 w.el("ConstraintType", constraint_code(t.constraint).to_string());
-                w.el("CalendarUID", "-1");
+                w.el("CalendarUID", task_cal_uid.to_string());
                 if t.constraint.needs_date() {
                     w.opt("ConstraintDate", t.constraint_date.map(dt));
                 }
@@ -445,6 +453,9 @@ pub fn to_xml(p: &Project) -> String {
         if t.leveling_delay != 0 {
             w.el("LevelingDelay", (t.leveling_delay * 10).to_string());
             w.el("LevelingDelayFormat", "7");
+        }
+        if task_cal_uid >= 0 {
+            w.el("IgnoreResourceCalendar", b(t.ignore_resource_calendars));
         }
         if !t.notes.is_empty() {
             w.el("Notes", &t.notes);
@@ -888,7 +899,8 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         }
     }
     let proj_cal = int(root, "CalendarUID").filter(|v| (0..=999_999_999).contains(v)).map(|u| u as u32).filter(|u| cals.contains_key(u)).or_else(|| cals.iter().filter(|(_, c)| c.base.is_none()).map(|(u, _)| *u).min());
-    if let Some(u) = proj_cal {
+    // a calendar with what it inherits from its bases
+    let build = |u: u32| -> Calendar {
         let week = resolve_week(&cals, u);
         // exceptions of the calendar and its bases
         // base calendars first, so the derived calendar's exceptions win
@@ -902,8 +914,13 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
             cur = c.base;
         }
         let ex: Vec<CalendarException> = chain.iter().rev().flat_map(|c| c.exceptions.iter().cloned()).collect();
-        p.calendar = Calendar { name: cals[&u].name.clone(), week, exceptions: ex };
+        Calendar { name: cals[&u].name.clone(), week, exceptions: ex }
+    };
+    if let Some(u) = proj_cal {
+        p.calendar = build(u);
     }
+    // task calendars become base calendars (file uid → ours)
+    let mut task_cal_map: HashMap<u32, u32> = HashMap::new();
 
     // ---- tasks ----
     let mut rows: Vec<(i64, Task, Option<NaiveDateTime>)> = vec![];
@@ -966,8 +983,36 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
                 let m = (ld / 10).clamp(0, MAX_MINUTES);
                 t.leveling_delay = if el { m * p.settings.durations.minutes_per_day / 1440 } else { m };
             }
-            if int(tn, "CalendarUID").is_some_and(|c| c >= 0) {
-                task_cals += 1;
+            if let Some(cu) = int(tn, "CalendarUID").filter(|c| (0..=999_999_999).contains(c)).map(|c| c as u32).filter(|c| Some(*c) != proj_cal && cals.contains_key(c)) {
+                let ours = match task_cal_map.get(&cu) {
+                    Some(&o) => o,
+                    None => {
+                        let mut cal = build(cu);
+                        if !cal.has_any_working_time() {
+                            task_cals += 1;
+                            cal = p.calendar.clone();
+                        }
+                        // unique names: Project allows a base and a resource calendar to share one
+                        let mut name = cal.name.trim().to_string();
+                        if name.is_empty() {
+                            name = format!("Calendar {cu}");
+                        }
+                        let taken = |n: &str, p: &Project| p.calendar.name.eq_ignore_ascii_case(n) || p.calendars.iter().any(|c| c.calendar.name.eq_ignore_ascii_case(n));
+                        let base_name = name.clone();
+                        let mut k = 2;
+                        while taken(&name, &p) {
+                            name = format!("{base_name} ({k})");
+                            k += 1;
+                        }
+                        cal.name = name;
+                        let uid = p.calendars.iter().map(|c| c.uid + 1).max().unwrap_or(2).max(2);
+                        p.calendars.push(crate::model::BaseCalendar { uid, calendar: cal });
+                        task_cal_map.insert(cu, uid);
+                        uid
+                    }
+                };
+                t.calendar = Some(ours);
+                t.ignore_resource_calendars = flag(tn, "IgnoreResourceCalendar").unwrap_or(false);
             }
             for l in kids(tn, "PredecessorLink") {
                 if flag(l, "CrossProject") == Some(true) {
@@ -1009,11 +1054,7 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
     }
     rows.sort_by_key(|r| r.0);
     if task_cals > 0 {
-        warnings.push(if task_cals == 1 {
-            "1 task used a task calendar; ProjectFCG schedules it on the project and resource calendars.".to_string()
-        } else {
-            format!("{task_cals} tasks used task calendars; ProjectFCG schedules them on the project and resource calendars.")
-        });
+        warnings.push(format!("{task_cals} task calendar{} had no working time; the project calendar is used instead.", if task_cals == 1 { "" } else { "s" }));
     }
     if dup_uids > 0 {
         warnings.push(format!("{dup_uids} task{} repeated another task's UID and {} skipped.", if dup_uids == 1 { "" } else { "s" }, if dup_uids == 1 { "was" } else { "were" }));

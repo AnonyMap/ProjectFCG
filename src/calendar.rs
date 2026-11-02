@@ -61,6 +61,26 @@ pub fn minute_of_day(dt: NaiveDateTime) -> u32 {
     t.hour() * 60 + t.minute()
 }
 
+/// The overlap of two sorted shift lists.
+pub fn intersect_shifts(a: &[Shift], b: &[Shift]) -> Vec<Shift> {
+    let mut out = vec![];
+    for x in a {
+        for y in b {
+            let (s, e) = (x.start.max(y.start), x.end.min(y.end));
+            if s < e {
+                out.push(Shift::new(s, e));
+            }
+        }
+    }
+    out.sort_by_key(|s| s.start);
+    out
+}
+
+/// Most minutes `add_work`/`sub_work` move: four centuries of elapsed
+/// time. Inputs are capped well below this; this keeps a damaged file
+/// from overflowing the date arithmetic.
+pub const MAX_WORK: i64 = 4 * crate::duration::MAX_MINUTES;
+
 pub fn at_minute(date: NaiveDate, minute: u32) -> NaiveDateTime {
     if minute >= 1440 {
         (date + ChronoDur::days(1)).and_hms_opt(0, 0, 0).unwrap()
@@ -122,6 +142,33 @@ impl Calendar {
             ],
             exceptions: vec![],
         }
+    }
+
+    /// Working time both calendars have: a task with its own calendar,
+    /// done by a resource with another, works when both do (Project's rule
+    /// unless "Scheduling ignores resource calendars"). Days either one
+    /// has an exception for become exception days of the result.
+    pub fn intersect(&self, other: &Calendar) -> Calendar {
+        let week = std::array::from_fn(|d| intersect_shifts(&self.week[d], &other.week[d]));
+        let mut days: Vec<NaiveDate> = vec![];
+        for e in self.exceptions.iter().chain(&other.exceptions) {
+            let mut d = e.start;
+            // long ranges (a year off) stay bounded
+            for _ in 0..3700 {
+                if d > e.end {
+                    break;
+                }
+                days.push(d);
+                d = d.succ_opt().unwrap_or(d);
+            }
+        }
+        days.sort();
+        days.dedup();
+        let exceptions = days
+            .into_iter()
+            .map(|d| CalendarException { name: String::new(), start: d, end: d, shifts: intersect_shifts(self.shifts_on(d), other.shifts_on(d)) })
+            .collect();
+        Calendar { name: format!("{} ∩ {}", self.name, other.name), week, exceptions }
     }
 
     pub fn shifts_on(&self, date: NaiveDate) -> &[Shift] {
@@ -231,6 +278,8 @@ impl Calendar {
         if minutes < 0 {
             return self.sub_work(start, -minutes);
         }
+        // far past any plan, and short of where dates overflow
+        let minutes = minutes.min(MAX_WORK);
         if minutes == 0 || !self.has_any_working_time() {
             return start + ChronoDur::minutes(minutes);
         }
@@ -270,6 +319,7 @@ impl Calendar {
         if minutes < 0 {
             return self.add_work(finish, -minutes);
         }
+        let minutes = minutes.min(MAX_WORK);
         if minutes == 0 || !self.has_any_working_time() {
             return finish - ChronoDur::minutes(minutes);
         }

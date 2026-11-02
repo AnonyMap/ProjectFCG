@@ -372,8 +372,12 @@ impl Ctx<'_> {
 /// resources occupies each assignment's span (work / units) on that
 /// resource's calendar; its start is the earliest assignment start and its
 /// finish the latest assignment finish. Other tasks use the project
-/// calendar. Elapsed durations ignore calendars.
+/// calendar. Elapsed durations ignore calendars. A task calendar replaces
+/// the project calendar for the task; with resources it's intersected with
+/// each resource's calendar, unless the task ignores resource calendars.
 struct SpanSet {
+    /// Tasks whose calendar and resources share no working time.
+    warnings: Vec<String>,
     cals: Vec<Calendar>,
     parts: Vec<Vec<(usize, i64)>>,
     elapsed: Vec<bool>,
@@ -407,17 +411,47 @@ impl SpanSet {
             }
             parts[ti].push((res_ci.get(&a.resource).copied().unwrap_or(0), p.assignment_span(ai)));
         }
+        // task calendars, and their intersections with resource calendars
+        let mut base_ci: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+        let mut both_ci: std::collections::HashMap<(usize, usize), usize> = std::collections::HashMap::new();
         let mut elapsed = vec![false; n];
         let mut mins = vec![0; n];
         for i in 0..n {
-            let d = &p.tasks[i].duration;
+            let t = &p.tasks[i];
+            let d = &t.duration;
             elapsed[i] = d.elapsed;
             mins[i] = d.minutes;
+            let task_ci = match t.calendar.and_then(|u| p.calendars.iter().find(|c| c.uid == u)) {
+                Some(bc) => *base_ci.entry(bc.uid).or_insert_with(|| {
+                    cals.push(bc.calendar.clone());
+                    cals.len() - 1
+                }),
+                None => 0,
+            };
             if parts[i].is_empty() || d.elapsed {
-                parts[i] = vec![(0, d.minutes)];
+                parts[i] = vec![(task_ci, d.minutes)];
+            } else if task_ci != 0 {
+                for part in parts[i].iter_mut() {
+                    part.0 = if t.ignore_resource_calendars {
+                        task_ci
+                    } else {
+                        let rc = part.0;
+                        *both_ci.entry((rc, task_ci)).or_insert_with(|| {
+                            let c = cals[rc].intersect(&cals[task_ci]);
+                            cals.push(c);
+                            cals.len() - 1
+                        })
+                    };
+                }
             }
         }
-        SpanSet { cals, parts, elapsed, mins }
+        let mut warnings = vec![];
+        for i in 0..n {
+            if !elapsed[i] && !st.is_summary[i] && parts[i].iter().any(|&(c, m)| m > 0 && !cals[c].has_any_working_time()) {
+                warnings.push(format!("Task {}: its calendar and its resources' calendars have no working time in common (it's scheduled as if in elapsed time).", i + 1));
+            }
+        }
+        SpanSet { warnings, cals, parts, elapsed, mins }
     }
     fn finish(&self, t: usize, s: NaiveDateTime) -> NaiveDateTime {
         if self.elapsed[t] {
@@ -801,6 +835,7 @@ fn run(p: &mut Project, prep: &Prepared, full: bool) {
     }
     p.calc.finish = Some(project_finish);
     p.calc.errors = g.errors.clone();
+    p.calc.errors.extend(sp.warnings.iter().cloned());
     crate::resources::compute_resources(p);
 }
 

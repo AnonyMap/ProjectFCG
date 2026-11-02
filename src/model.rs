@@ -286,6 +286,12 @@ pub struct Task {
     /// Baselines 1–10 (Baseline 0 is `baseline`).
     #[serde(default)]
     pub baselines: [Option<Baseline>; 10],
+    /// Task calendar (a base calendar's uid); `None`: the project calendar.
+    #[serde(default)]
+    pub calendar: Option<u32>,
+    /// Scheduling ignores resource calendars (only the task calendar counts).
+    #[serde(default)]
+    pub ignore_resource_calendars: bool,
     #[serde(skip)]
     pub calc: Computed,
 }
@@ -493,6 +499,8 @@ impl Task {
             actual_start: None,
             actual_finish: None,
             baselines: [None; 10],
+            calendar: None,
+            ignore_resource_calendars: false,
             calc: Computed::default(),
         }
     }
@@ -596,12 +604,23 @@ pub struct Project {
     /// Custom filters (View ▸ Filter ▸ New Filter…).
     #[serde(default)]
     pub views: crate::views::Views,
+    /// Base calendars besides the project calendar, for tasks (Night Shift,
+    /// 24 Hours, your own).
+    #[serde(default)]
+    pub calendars: Vec<BaseCalendar>,
     #[serde(skip)]
     pub calc: ProjectCalc,
 }
 
 fn one() -> u32 {
     1
+}
+
+/// A base calendar a task can use (Task Information ▸ Advanced ▸ Calendar).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BaseCalendar {
+    pub uid: u32,
+    pub calendar: Calendar,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -640,6 +659,7 @@ impl Project {
             board: Default::default(),
             baseline_saved: [None; 11],
             views: Default::default(),
+            calendars: vec![],
             calc: ProjectCalc::default(),
         }
     }

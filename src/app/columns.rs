@@ -73,6 +73,8 @@ pub enum ColumnId {
     Eac,
     Vac,
     Tcpi,
+    /// The task's calendar (empty: the project calendar).
+    TaskCalendar,
     /// Baseline 1–10 start / finish.
     BaselineNStart(u8),
     BaselineNFinish(u8),
@@ -111,6 +113,7 @@ impl ColumnId {
         ColumnId::Critical,
         ColumnId::Milestone,
         ColumnId::Notes,
+        ColumnId::TaskCalendar,
         ColumnId::StartSlack,
         ColumnId::FinishSlack,
         ColumnId::BaselineStart,
@@ -179,7 +182,7 @@ impl ColumnId {
         use ColumnId::*;
         match self {
             Indicators | Mode | Name | Notes | Wbs | UniqueId | Milestone | Status => "General",
-            Duration | Start | Finish | Predecessors | Successors | ConstraintType | ConstraintDate | Deadline | EarlyStart | EarlyFinish | LateStart | LateFinish => "Schedule",
+            Duration | Start | Finish | Predecessors | Successors | ConstraintType | ConstraintDate | Deadline | EarlyStart | EarlyFinish | LateStart | LateFinish | TaskCalendar => "Schedule",
             TotalSlack | FreeSlack | StartSlack | FinishSlack | Critical => "Slack & Critical",
             PercentComplete | ActualStart | ActualFinish | ActualDuration | RemainingDuration | ActualWork | RemainingWork | PercentWorkComplete => "Tracking",
             BaselineStart | BaselineFinish | BaselineDuration | BaselineWork | BaselineCost | StartVariance | FinishVariance | DurationVariance => "Baseline & Variance",
@@ -276,6 +279,7 @@ impl ColumnId {
             ColumnId::Critical => "Critical",
             ColumnId::Milestone => "Milestone",
             ColumnId::Notes => "Notes",
+            ColumnId::TaskCalendar => "Task Calendar",
             ColumnId::StartSlack => "Start Slack",
             ColumnId::FinishSlack => "Finish Slack",
             ColumnId::BaselineStart => "Baseline Start",
@@ -367,6 +371,7 @@ impl ColumnId {
             | ColumnId::LevelingDelay
             | ColumnId::ActualDuration
             | ColumnId::RemainingDuration
+            | ColumnId::TaskCalendar
             | ColumnId::Notes => EditKind::Text,
             ColumnId::Start | ColumnId::Finish | ColumnId::ConstraintDate | ColumnId::Deadline | ColumnId::ActualStart | ColumnId::ActualFinish => {
                 EditKind::Date
@@ -447,6 +452,7 @@ pub fn cell_text(p: &Project, row: usize, col: ColumnId) -> String {
         ColumnId::Critical => if c.critical { "Yes" } else { "No" }.into(),
         ColumnId::Milestone => if t.is_milestone() { "Yes" } else { "No" }.into(),
         ColumnId::Notes => t.notes.lines().next().unwrap_or("").to_string(),
+        ColumnId::TaskCalendar => t.calendar.and_then(|u| p.base_calendar(u)).map(|c| c.name.clone()).unwrap_or_default(),
         ColumnId::StartSlack => dur_days(p, c.start_slack),
         ColumnId::FinishSlack => dur_days(p, c.finish_slack),
         ColumnId::BaselineStart => opt_date(bl.map(|b| b.start)),
@@ -549,6 +555,7 @@ pub fn edit_text(p: &Project, row: usize, col: ColumnId) -> String {
         ColumnId::ActualFinish => t.actual_finish.map(fmt_datetime).unwrap_or_default(),
         ColumnId::PercentComplete => fmt_num(t.percent_complete),
         ColumnId::Notes => t.notes.clone(),
+        ColumnId::TaskCalendar => t.calendar.and_then(|u| p.base_calendar(u)).map(|c| c.name.clone()).unwrap_or_default(),
         ColumnId::FixedCost => crate::duration::fmt_num(t.fixed_cost),
         ColumnId::Mode => match t.mode {
             TaskMode::Auto => "Auto Scheduled".into(),
@@ -632,6 +639,23 @@ pub fn set_cell(p: &mut Project, row: usize, col: ColumnId, text: &str) -> Resul
         ColumnId::Notes => {
             p.tasks[row].notes = text.to_string();
             Ok(())
+        }
+        ColumnId::TaskCalendar => {
+            let keep = p.tasks[row].ignore_resource_calendars;
+            if txt.is_empty() || txt.eq_ignore_ascii_case("none") || txt.eq_ignore_ascii_case(p.calendar.name.trim()) {
+                return p.set_task_calendar(row, None, false);
+            }
+            match p.calendar_by_name(txt) {
+                Some(u) => p.set_task_calendar(row, Some(u), keep),
+                None => {
+                    let names: Vec<String> = p.calendars.iter().map(|c| c.calendar.name.clone()).collect();
+                    Err(if names.is_empty() {
+                        "There are no task calendars yet: make one in Project ▸ Change Working Time.".into()
+                    } else {
+                        format!("No calendar called \"{txt}\". Calendars: {}.", names.join(", "))
+                    })
+                }
+            }
         }
         ColumnId::FixedCost => {
             p.tasks[row].fixed_cost = crate::resources::parse_money(txt, &p.settings.currency_symbol)?;
@@ -725,6 +749,7 @@ pub fn reset_cell(p: &mut Project, row: usize, col: ColumnId) -> Result<(), Stri
             p.tasks[row].notes.clear();
             Ok(())
         }
+        ColumnId::TaskCalendar => p.set_task_calendar(row, None, false),
         ColumnId::PercentComplete => p.set_field_text(row, Field::PercentComplete, "0"),
         ColumnId::Duration => p.set_field_text(row, Field::Duration, "1d?"),
         _ => Ok(()),

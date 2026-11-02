@@ -436,6 +436,18 @@ fn paint_cell(app: &ProjectFcgApp, p: &Painter, cell: Rect, i: usize, col: Colum
                 });
                 x += 13.0;
             }
+            if let Some(cal) = t.calendar.and_then(|u| proj.base_calendar(u)) {
+                // a small calendar page
+                let r = Rect::from_center_size(pos2(x + 5.0, cy), vec2(9.0, 9.0));
+                clip.rect_stroke(r, 1.0, Stroke::new(1.0, pal().glyph), StrokeKind::Inside);
+                clip.rect_filled(Rect::from_min_size(r.min, vec2(9.0, 2.5)), 1.0, pal().glyph);
+                tips.push(format!(
+                    "The calendar \"{}\" is assigned to the task{}.",
+                    cal.name,
+                    if t.ignore_resource_calendars { "; scheduling ignores resource calendars" } else { "" }
+                ));
+                x += 13.0;
+            }
             if let Some(r) = &t.recurrence {
                 icon_recurring(&clip, pos2(x + 5.0, cy));
                 tips.push(format!("Recurring task: {}. Task Information edits the series.", r.describe()));

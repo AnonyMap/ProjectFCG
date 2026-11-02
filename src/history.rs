@@ -78,6 +78,8 @@ pub fn same_task(a: &Task, b: &Task) -> bool {
         actual_start,
         actual_finish,
         baselines,
+        calendar,
+        ignore_resource_calendars,
         calc: _,
     } = a;
     *uid == b.uid
@@ -110,6 +112,8 @@ pub fn same_task(a: &Task, b: &Task) -> bool {
         && *actual_start == b.actual_start
         && *actual_finish == b.actual_finish
         && *baselines == b.baselines
+        && *calendar == b.calendar
+        && *ignore_resource_calendars == b.ignore_resource_calendars
 }
 
 /// Same for everything in a project that isn't a task (or computed).
@@ -132,6 +136,7 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         board,
         baseline_saved,
         views,
+        calendars,
         calc: _,
     } = a;
     *title == b.title
@@ -148,6 +153,7 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         && *board == b.board
         && *baseline_saved == b.baseline_saved
         && *views == b.views
+        && *calendars == b.calendars
 }
 
 fn rest_of(p: &Project) -> Box<Project> {
@@ -169,6 +175,7 @@ fn rest_of(p: &Project) -> Box<Project> {
         board: p.board.clone(),
         baseline_saved: p.baseline_saved,
         views: p.views.clone(),
+        calendars: p.calendars.clone(),
         calc: Default::default(),
     })
 }
@@ -259,13 +266,19 @@ impl Default for History {
 
 impl History {
     /// Record a change described by `label` from `before` to `after`.
-    pub fn checkpoint(&mut self, label: &str, before: &Project, after: &Project) {
+    /// Record an edit. An edit that changed nothing leaves no step (and
+    /// returns false).
+    pub fn checkpoint(&mut self, label: &str, before: &Project, after: &Project) -> bool {
         let back = diff(after, before);
+        if back.is_empty() {
+            return false;
+        }
         self.undo.push((label.to_string(), back));
         if self.undo.len() > self.limit {
             self.undo.remove(0);
         }
         self.redo.clear();
+        true
     }
 
     /// Drop the most recent checkpoint (used when an edit turns out to be a
