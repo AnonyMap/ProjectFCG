@@ -320,7 +320,7 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 * **Text1–10, Number1–10, Flag1–10, Date1–10 and Cost1–10** on every task. Rename any of them ("Team", "Risk"), add them as columns, type values in. Values are typed: numbers sort and filter as numbers, flags are Yes/No, dates are dates.
 * They work in custom filters, Group By (*by field*) and print, and travel through Project XML as Project's own custom fields (its field IDs, aliases and value formats), so they open in Project with the same names.
 
-![Custom fields renamed Team, Risk and Approved as columns, with Group By Team](docs/custom.png)
+![Custom fields renamed Team, Risk and Vendor as columns, beside the Task Calendar column (a Night Shift and a 24 Hours task)](docs/custom.png)
 
 **Bugs found by a review of the core** (12, all fixed and pinned by `tests/core_regressions.rs`)
 
