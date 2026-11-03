@@ -1,7 +1,7 @@
 # ProjectFCG
 
 A Gantt-chart project scheduler for Linux, written in Rust, whose scheduling
-engine follows Microsoft Project's rules. Version 0.8.0 covers **core
+engine follows Microsoft Project's rules. Version 0.9.0 covers **core
 scheduling** (0.1), **Gantt formatting, critical path analysis, baselines and
 adjustable text size** (0.2), **resources, assignments, costs and leveling**
 (0.3), **themes with dark mode** plus a performance pass (0.4), a
@@ -11,7 +11,8 @@ Microsoft Project XML import/export** (0.6), and **dependencies between the
 board and the schedule, Jira's sprint lifecycle, swimlanes and WIP limits,
 recurring and inactive tasks** (0.7), and **Group By and custom filters,
 releases tied to the schedule, cumulative flow, slippage bars and Copy
-Picture** (0.8).
+Picture** (0.8), and **printing to PDF, task calendars, custom fields and
+updates through Gear Lever** (0.9).
 
 *FCG* = Fast, Cheap, Good: pick two.
 
@@ -46,7 +47,14 @@ chmod +x ProjectFCG-x86_64.AppImage
 ```
 
 * Bazzite ships **Gear Lever** for integrating AppImages into the app menu;
-  that is the easiest way to "install" it.
+  that is the easiest way to "install" it. **Updates:** from 0.9 on, the
+  AppImages on GitHub's releases page carry their update address, so Gear
+  Lever's *Check for updates* finds new versions by itself. An AppImage from
+  0.8 or earlier doesn't know where it came from: in Gear Lever, open
+  ProjectFCG, *Update management*, choose **Github**, set *Username/Repo* to
+  `AnonyMap/ProjectFCG` and *Release file name* to
+  `ProjectFCG-*-linux-x86_64.AppImage`. (Locally built AppImages have no
+  update address.)
 * The AppImage uses the static type-2 runtime, so it does **not** need
   `libfuse2`. If FUSE is unavailable for any reason, run it with
   `--appimage-extract-and-run`.
@@ -288,6 +296,45 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 
 * Finding a top-level task's summary used to scan back to the first row, which made anything that walks the outline quadratic on big plans. Custom filters with *Show related summary rows* went from 18 ms to 2 ms per redraw on 5,000 tasks.
 
+### New in 0.9: print, task calendars, custom fields
+
+**Print and PDF** (File ▸ Print…, Ctrl+P)
+
+* The view as it is, with filter, groups and collapsed rows, on as many pages as the rows need. The sheet's first columns are on the left and the Gantt bars (in the file's bar styles), links, baselines and the status date are across the page. The timescale tiers (weeks and days, months and weeks, quarters and months, years) are picked to fit.
+* Letter, Legal, Tabloid, A4 or A3, landscape or portrait, the whole project or a date range, headings on every page.
+* **Print…** opens the PDF in your viewer to print it; **Save as PDF…** keeps it. It's vector output in the PDF's standard fonts, so a 300-task plan is a few hundred KB.
+
+![A printed page: the table's first columns, Gantt bars in the file's styles, links and the timescale](docs/print.png)
+
+**Task calendars** (Project's base calendars)
+
+* **Change Working Time** now manages several calendars: the project calendar plus any you create, from a copy of the project calendar or from Project's *Standard*, *24 Hours* and *Night Shift*. Rename, edit the work week and exceptions, or delete them.
+* Give a task a calendar in **Task Information ▸ Advanced**, or type its name in the new **Task Calendar** column. A task on *24 Hours* runs around the clock; one on *Night Shift* runs 11 PM to 8 AM.
+* With resources, the task works only when both its calendar and each resource's calendar do (Project's rule), unless **Scheduling ignores resource calendars** is ticked. A task whose calendar and resources share no time is reported.
+* Task calendars travel through Project XML, which was the main cause of imported plans landing on different dates.
+
+![Change Working Time with a second calendar, Plant (Sat shifts): the month previews the work week as you edit it](docs/calendars.png)
+
+**Custom fields** (Project ▸ Custom Fields)
+
+* **Text1–10, Number1–10, Flag1–10, Date1–10 and Cost1–10** on every task. Rename any of them ("Team", "Risk"), add them as columns, type values in. Values are typed: numbers sort and filter as numbers, flags are Yes/No, dates are dates.
+* They work in custom filters, Group By (*by field*) and print, and travel through Project XML as Project's own custom fields (its field IDs, aliases and value formats), so they open in Project with the same names.
+
+![Custom fields renamed Team, Risk and Vendor as columns, beside the Task Calendar column (a Night Shift and a 24 Hours task)](docs/custom.png)
+
+**Bugs found by a review of the core** (12, all fixed and pinned by `tests/core_regressions.rs`)
+
+* A duration like `100000000d` or a lag like `+inf%` crashed the app. "NaN" typed into a cost or a % lag was saved, and the file then wouldn't open.
+* The **Delete** key deleted the whole task from any column. It now clears the field unless the Task Name cell or a whole row (click the row number) is selected, as decision 5 always said.
+* **Cut and paste**, the usual way to move tasks, lost their resource assignments; it now keeps them. Pasting could leave a link from a task to its own summary, and pasting thousands of rows was slow.
+* Update Project ▸ *Reschedule uncompleted work* ignored *Selected tasks*. Typing a Finish on a manual task with resources changed its duration but not its bar. A Fixed Work task set to 0 days lost its work for good. Elapsed units in Leveling Delay were read as working time. Edits that changed nothing left empty undo steps.
+
+**Bugs found by an independent review of the 0.9 work** (10, all fixed; 8 pinned by tests that fail on the old code)
+
+* The serious one: only the scheduler knew a task works on *its calendar ∩ its resources' calendars*. Actual Finish, typed finishes, bar resizing, assignment dates (so Resource Usage and leveling) and % scheduled each used a different calendar. A 3-day task on *24 Hours* with a Standard resource grew from 24h to 57h of work when you entered the finish it already had. All of them now share the scheduler's rule (decision 62).
+* Intersecting calendars wrote long exceptions out day by day and stopped after ten years, so a task could be scheduled during a resource's 14-year absence, and scheduling 5,000 tasks with task calendars took 14× longer. Exceptions now intersect as date ranges.
+* Number custom fields were rounded to 2 places by Fill Down and in Project XML (0.001 was lost). Clicking a bar then pressing Delete cleared a field instead of deleting the task. Printing a date range drew labels of bars outside it over the table. A pasted task could keep a deleted calendar and silently join the next one created. The filter dialog's field list rescanned every task 50 times a frame. A stray build file was committed.
+
 ### Keyboard shortcuts (Microsoft Project's)
 Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task Information) · Ctrl+F2 / Ctrl+Shift+F2 (link / unlink) · Alt+Shift+→/← (indent/outdent) · Alt+Shift+↑/↓ (move) · Alt+Shift+− / = / Numpad* (hide / show / show all subtasks) · Ctrl+Shift+M / Ctrl+Alt+Shift+A (manual / auto) · Ctrl+Shift+F5 (scroll to task) · F5 (Go To) · Ctrl+F, Shift+F4 (find / next) · F9, Ctrl+F9 (calculate / auto-calc) · Ctrl+/ and Ctrl+* (zoom) · Alt+Home/End, Alt+←/→, Alt+PgUp/PgDn (timescale) · Ctrl+D (fill down) · Ctrl+Delete (reset field) · Ctrl+Shift+F11 (light/dark) · Ctrl+Z/Y, Ctrl+X/C/V, Ctrl+N/O/S, F12 · Alt+F10 (Assign Resources). The full list is under Help ▸ Keyboard Shortcuts or F1.
 
@@ -350,7 +397,13 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 55. **A release's projected date is its milestone's finish when it has one, else the latest sprint end with unfinished stories.** The milestone includes anything else linked before it (QA, app store review), so it's the better forecast. With unplanned stories there's no projection, since nothing says when they'll be done.
 56. **The release date is copied to the milestone's Deadline when you set it** (and taken off when the release moves to another milestone or loses its date, if nobody changed it in between). Editing the deadline on the task doesn't change the release; edit the release.
 57. **The flow chart counts the sprint's current tickets.** Tickets carried out of a sprint when it was completed don't appear in its past days. Recording sprint membership over time would fix that; it's not worth the file size yet.
-58. **Copy Picture saves what's on screen** (Project's "For screen"), not the whole plan at print resolution. Full-plan image and PDF export is still on the roadmap.
+58. **Copy Picture saves what's on screen** (Project's "For screen"); File ▸ Print (0.9) prints the whole plan.
+59. **Printing writes a PDF and hands it to your PDF viewer** rather than talking to printers directly. Every desktop's viewer prints well (and remembers the printer), and the same file can be mailed. Text uses the PDF's built-in Helvetica, so characters outside Western European ones print as "?"; embedding a font would fix it at the cost of a much bigger file.
+60. **The table on paper gets up to half the page width**: the view's columns in order until that fills (Task Name always). The timescale fits the whole plan, or the chosen dates, to the width that's left.
+61. **The project calendar stays one calendar, and task calendars are separate base calendars.** Resources keep inheriting from the project calendar. In Project any base calendar can be the project calendar; here you'd copy it instead.
+62. **One rule for which calendar a task works on, used everywhere.** The scheduler, typed and dragged finishes, actuals, % complete, earned value, the progress line, assignment dates, Resource Usage and leveling all measure a task on the same calendar: its own calendar ∩ each resource's (or just its own when it ignores resource calendars), or the resource's calendar, or the project's. For a task with several resources on different calendars, the single-number measures (actual finish → duration, % scheduled) use the first work resource's. In 0.9's first draft these places each worked it out for themselves and disagreed, which is what the review below caught.
+63. **Ten of each custom field type, not Project's 30 Text and 20 Number.** Values a Project XML file has in fields beyond those (and outline codes) are listed after import. Custom fields have no formulas or value lists yet, and summaries don't roll them up.
+64. **Delete with a whole row selected deletes the task.** Clicking the row number or a bar in the chart, Shift+Space or Select All selects whole rows; clicking a cell or moving with the arrow keys selects cells again.
 
 ## Not yet implemented (Roadmap)
 
@@ -358,14 +411,14 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 |---|---|
 | ~~Agile~~ | Board, sprints, backlog, burndown, velocity (0.5); epics, issue types, sub-tasks, links, labels, filters, Jira CSV (0.6); board ↔ Gantt dependencies, sprint lifecycle, columns, WIP limits, swimlanes (0.7); releases, cumulative flow (0.8). Still open: Jira REST sync, control chart / cycle time |
 | ~~Resources~~ | Done in 0.3. Still open: work contours, overtime, time-phased cost accrual, resource pools, Team Planner, generic/budget resources, leveling that splits tasks |
-| ~~Interop~~ | MSPDI XML import/export done in 0.6. Still open: print/PDF export, `.mpp` reading, task calendars and splits in XML |
+| ~~Interop~~ | MSPDI XML import/export done in 0.6; task calendars and custom fields in 0.9; print/PDF in 0.9. Still open: `.mpp` reading, splits and outline codes in XML |
 | ~~Tracking~~ | Done in 0.6; slippage bars in 0.8. Still open: physical % complete, actual work entered per assignment, time-phased actuals |
-| Later | Full-plan image/PDF export and printing (0.8 saves the screen), drawings, task calendars, Network Diagram, Calendar view, Team Planner, custom fields/formulas, multi-level groups, AutoFilter on column headers, split tasks, schedule-from-finish projects, a high-contrast theme, fast leveling for plans with ALAP tasks |
+| Later | Drawings, Network Diagram, Calendar view, Team Planner, custom field formulas and value lists, outline codes, multi-level groups, AutoFilter on column headers, split tasks, schedule-from-finish projects, a high-contrast theme, fast leveling for plans with ALAP tasks, embedded fonts in PDFs |
 
 ## Building from source
 
 ```sh
-cargo test                          # 315 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, invariants, UI (headless)
+cargo test                          # 354 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, invariants, UI (headless)
 cargo test --release --test perf -- --ignored --nocapture   # timings on 500–5,000-task projects
 cargo run --release -- --sample
 ./packaging/build-appimage.sh       # → dist/ProjectFCG-x86_64.AppImage
@@ -383,7 +436,12 @@ published on GitHub, and attaches the files to it:
 3. The workflow runs the tests, then builds three files in parallel, each
    smoke-tested with `--self-test`:
    * `ProjectFCG-v0.7.0-linux-x86_64.AppImage`: built on Ubuntu 22.04, so it
-     runs on any distribution from 2022 on.
+     runs on any distribution from 2022 on. It carries its update
+     information (`gh-releases-zsync|AnonyMap|ProjectFCG|latest|ProjectFCG-*-linux-x86_64.AppImage.zsync`),
+     and a `.zsync` file is uploaded next to it. Gear Lever compares that
+     file's SHA-1 with the installed AppImage to see whether there's an update;
+     AppImageUpdate can use it to download only what changed. The build fails
+     if the update information is missing.
    * `ProjectFCG-v0.7.0-windows-x86_64.exe`: a single file with the app icon.
      There's no installer and nothing to unpack.
    * `ProjectFCG-v0.7.0-macos-universal.dmg`: one app for Apple Silicon and
@@ -419,6 +477,10 @@ Double-clicking a `.pfcg` file doesn't open it there yet; use File ▸ Open.
 * `tests/scheduling.rs`: 46 behaviour tests whose expected dates were derived by hand from Project's rules (Standard calendar, project start Mon 1/5/2026). They cover all link types, lags and leads, constraints and conflicts, ALAP, deadlines, holidays, elapsed time, manual tasks, summaries, slack, editing operations, undo, file round-trip, and a 2,000-task performance check.
 * `tests/analysis.rs`: 12 tests for start drivers, multiple critical paths, start/finish slack, Task Path sets (including through summary links), Status/Late rollups, baselines, and loading 0.1.0 files.
 * `tests/resources.rs`: 23 tests for task types, effort-driven, Resource Names notation, resource calendars, costs, overallocation, usage, leveling (order, priority, within-slack, chains, selection), file round-trip, and 300 tasks leveled in under a second.
+* `tests/print.rs`: 4 tests: bar labels outside the printed dates, the sample on one page with its tasks, a 300-task plan on Letter, A4 and Tabloid with every row once and the page count right, and printing what the view shows (filter, groups, date range). Each PDF is checked with `qpdf --check` and read back with `pdftotext` where they're installed.
+* `tests/calendars.rs`: 12 tests: the same calendar for actual finish, % scheduled, assignments and Resource Usage, typed finishes on night shifts, ten-year exceptions intersected as ranges, pasting a task whose calendar was deleted, 24 Hours and Night Shift tasks, task ∩ resource calendars and ignoring resource calendars, exceptions of either calendar, names, deletes, summaries, repair, files, Project XML and undo, and the Change Working Time dialog's create / switch / delete.
+* `tests/custom_fields.rs`: 6 tests: full precision through Fill Down and Project XML, typed values and how they show, refusals, aliases, filters and groups on custom fields, files, undo, repair, and Project XML with Project's field IDs (and fields we don't hold reported).
+* `tests/core_regressions.rs`: 13 tests, one per finding of the 0.9 bug hunt.
 * `tests/views.rs`: 14 tests: custom filters comparing durations, dates, money and text by type, And/Or precedence, Within, related summary rows, Date Range and Using Resource, Group By (built-in and by field, rollups, collapsing, with filters), saving, undo and validation, and the 0.8 review's findings.
 * `tests/releases.rs`: 10 tests: progress, projection and risk as stories move between sprints, what can carry a release, a milestone following its release (and the tasks linked to it), loops reported, releasing with carry-over, repairing files, Fix Version/s in Jira CSV, and the 0.8 review's findings.
 * `tests/board.rs`: 17 tests (including the sample's current sprint on every day of the week, and cumulative flow from recorded moves): starting and completing sprints (commitment, carry-over with sub-tasks, frozen velocity, reopening), editing columns (remapping, Done follows the last column); new sprints, ticket moves and ordering, done stamping, progress by points and by count, unestimated fallback, unmarking and deleting sprints, burndown, velocity and its average, assignees booking no work, file round-trip and loading 0.4 files, and the agile sample pinned to a fixed date.
@@ -428,7 +490,7 @@ Double-clicking a `.pfcg` file doesn't open it there yet; use File ▸ Open.
 * `tests/dependencies.rs`: 12 tests: a task following its story's sprint (and moving with it), released at the done time, unplanned stories reported, epics, keys in the Predecessors text, loops refused or reported, stories waiting on tasks and planning conflicts, blockers planned later, deletes, files and undo, leveling, and the 0.7 review's findings.
 * `tests/recurring.rs`: 5 tests: weekly series on chosen days, editing in place (links and extra tasks survive), holidays, month-end and yearly dates, daily series over weekends, refusals, files, undo and XML.
 * `tests/inactive.rs`: 3 tests: no effect on successors, rollups, totals, resources or leveling; whole inactive phases; files and XML.
-* `tests/ui.rs`: 76 end-to-end tests (new in 0.8: the Releases panel by mouse, collapsing group headers, Copy Picture's PNG) that drive the real app through egui's input pipeline (keystrokes, typing, clicks, double-clicks, bar and card drags) without a window. They include theme switching; every tab, view and dialog drawn in every theme; tracking tables and dialogs; real mouse drags of cards between columns, into and out of the backlog, onto an epic, and to a precise position; the filter bar; the ticket dialog with sub-tasks and links in one undo step; the Jira import dialog and export; Save as XML and opening XML; and a check that every symbol in the UI exists in the bundled fonts.
+* `tests/ui.rs`: 77 end-to-end tests (new in 0.9: Delete after clicking a bar) that drive the real app through egui's input pipeline (keystrokes, typing, clicks, double-clicks, bar and card drags) without a window. They include theme switching; every tab, view and dialog drawn in every theme; tracking tables and dialogs; real mouse drags of cards between columns, into and out of the backlog, onto an epic, and to a precise position; the filter bar; the ticket dialog with sub-tasks and links in one undo step; the Jira import dialog and export; Save as XML and opening XML; and a check that every symbol in the UI exists in the bundled fonts.
 * A third independent review, of the 0.8 code, found 11 problems, among them: undoing a filter's deletion applied a different filter, Shift+arrow selected the wrong tasks in a grouped view, a release's old milestone kept its deadline, and the flow chart was empty for imported tickets. All are fixed and pinned by `review_*` tests in `tests/views.rs` and `tests/releases.rs`.
 * Rendering the README screenshots turned up four more: the burndown's legend overlapped its axis, the status bar named a custom filter "Custom Filter", grouped views listed summary tasks under any filter, and over a weekend the flow chart never showed where tickets were.
 * A second independent review, of the 0.7 scheduler, board and recurring/inactive code, found 18 more. Among them: typing a key followed by non-ASCII text could crash, a sprint could be held up by its own finished story, leveling miscounted inactive tasks and board loops, and editing a recurring task dropped links to its occurrences. All are fixed and pinned by `review_regressions_0_7_*` tests and the randomized leveler check.
@@ -447,6 +509,9 @@ src/leveling.rs   resource leveling (dependency-ordered, lazy forward pass)
 src/board.rs      Kanban tickets, issue types, epics, sub-tasks, links, sprints, progress, burndown, velocity, cumulative flow
 src/releases.rs   releases (fix versions): progress, projection, milestones
 src/views.rs      custom filter definitions (saved in the file)
+src/calendars.rs  base calendars for tasks
+src/custom_fields.rs  Text/Number/Flag/Date/Cost custom fields
+src/pdf.rs        a small PDF writer (vector drawing, base-14 fonts)
 src/recurring.rs  recurring task patterns and occurrences
 src/tracking.rs   actuals, Update Project, Mark on Track, earned value
 src/jira.rs       Jira CSV import/export (CSV parser, field mapping)
@@ -458,7 +523,7 @@ src/history.rs    undo/redo
 src/io.rs         .pfcg JSON and CSV export
 src/app/          egui front end (ribbon, table, gantt, bars, timeline, inspector, dialogs,
                   resource sheet, usage views, resource dialogs, themes, system theme detection,
-                  board view, tracking and import dialogs, filters and groups, release dialogs)
+                  board view, tracking and import dialogs, filters and groups, release dialogs, print)
 examples/xmldump.rs  writes the samples as MS Project XML (for checking with other tools)
 examples/screens.rs  renders the README screenshots (`xvfb-run cargo run --release --example screens -- docs board`)
 examples/profile.rs  profiling driver (callgrind: `cargo build --profile profiling --example profile`)

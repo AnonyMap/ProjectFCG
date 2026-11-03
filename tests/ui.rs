@@ -1949,3 +1949,18 @@ fn copy_picture_saves_a_png() {
     assert!(matches!(h.app.picture, Picture::None));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn delete_after_clicking_a_bar_deletes_the_task() {
+    // the active cell was Duration; picking a bar picks the whole task
+    let mut h = three_tasks();
+    let dur = h.col(ColumnId::Duration);
+    h.goto(0, dur);
+    h.app.scroll_gantt_to(dt(1, 5, 8));
+    h.frame(vec![]);
+    let s = h.app.project.tasks[1].calc.start.unwrap();
+    let f = h.app.project.tasks[1].calc.finish.unwrap();
+    h.click(pos2((h.gantt_x(s) + h.gantt_x(f)) / 2.0, h.gantt_row_y(1)));
+    h.key(Key::Delete, NONE);
+    assert_eq!(h.names(), ["Design", "Test"]);
+}

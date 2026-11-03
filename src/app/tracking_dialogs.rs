@@ -243,7 +243,7 @@ fn update_project(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         let sel = s2.selected_only.then_some(rows.as_slice());
         let changed = if s2.reschedule {
             let after = parse_date(&s2.after, p.default_start_time())?;
-            p.update_project(after, UpdateMode::Proportional, Some(&[]), Some(after))
+            p.reschedule_uncompleted(after, sel)
         } else {
             let through = parse_date(&s2.through, p.default_finish_time())?;
             p.update_project(through, s2.mode, sel, None)

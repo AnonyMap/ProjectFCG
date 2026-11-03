@@ -132,6 +132,70 @@ fn dark(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.execute(Command::ZoomEntireProject, ctx);
 }
 
+/// Custom fields and task calendars in the sheet.
+fn custom(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    use projectfcg::app::columns::set_cell;
+    use projectfcg::custom_fields::{CustomField, FieldKind};
+    app.tab = RibbonTab::Project;
+    let team = CustomField::new(FieldKind::Text, 1);
+    let risk = CustomField::new(FieldKind::Number, 1);
+    let ext = CustomField::new(FieldKind::Flag, 1);
+    app.edit_project("Custom Fields", |p| {
+        p.set_custom_alias(team, "Team")?;
+        p.set_custom_alias(risk, "Risk")?;
+        p.set_custom_alias(ext, "Vendor")?;
+        let rows: Vec<(String, &str, &str, &str)> = vec![
+            ("Define requirements".into(), "Product", "2", "no"),
+            ("Architecture review".into(), "Platform", "3", "no"),
+            ("Backend API".into(), "Platform", "8", "no"),
+            ("Frontend UI".into(), "Web", "5", "yes"),
+            ("Database migration".into(), "Platform", "9", "no"),
+            ("Integration testing".into(), "QA", "4", "no"),
+            ("Performance testing".into(), "QA", "6", "yes"),
+            ("User acceptance testing".into(), "Product", "3", "no"),
+            ("User documentation".into(), "Docs", "1", "yes"),
+            ("Production deployment".into(), "Ops", "7", "no"),
+        ];
+        for (n, t, r, v) in rows {
+            if let Some(i) = p.tasks.iter().position(|x| x.name == n) {
+                set_cell(p, i, ColumnId::Custom(team), t)?;
+                set_cell(p, i, ColumnId::Custom(risk), r)?;
+                set_cell(p, i, ColumnId::Custom(ext), v)?;
+            }
+        }
+        let c = p.add_base_calendar("24 Hours", projectfcg::calendars::Template::TwentyFourHours)?;
+        let n = p.add_base_calendar("Night Shift", projectfcg::calendars::Template::NightShift)?;
+        let mig = p.tasks.iter().position(|x| x.name == "Database migration").unwrap();
+        let dep = p.tasks.iter().position(|x| x.name == "Production deployment").unwrap();
+        p.set_task_calendar(mig, Some(n), true)?;
+        p.set_task_calendar(dep, Some(c), true)?;
+        Ok(())
+    });
+    // a sheet showing them
+    app.columns.retain(|c| !matches!(c.id, ColumnId::Predecessors | ColumnId::ResourceNames));
+    for (k, (id, w)) in [(ColumnId::Custom(team), 82.0), (ColumnId::Custom(risk), 50.0), (ColumnId::Custom(ext), 56.0), (ColumnId::TaskCalendar, 92.0)].into_iter().enumerate() {
+        app.columns.insert(4 + k, projectfcg::app::ColumnState { id, width: w });
+    }
+    app.table_width = 900.0;
+    let r = row(app, "Database migration");
+    app.select_index(r);
+    app.execute(Command::ZoomEntireProject, ctx);
+}
+
+/// Change Working Time with several calendars.
+fn calendars(app: &mut ProjectFcgApp, _ctx: &egui::Context) {
+    app.tab = RibbonTab::Project;
+    app.edit_project("Change Working Time", |p| p.add_base_calendar("Night Shift", projectfcg::calendars::Template::NightShift).map(|_| ()));
+    app.dialogs.open_working_time(&app.project);
+    let st = app.dialogs.working_time.as_mut().unwrap();
+    st.new_name = "Plant (Sat shifts)".into();
+    st.new_template = projectfcg::calendars::Template::Standard;
+    let _ = st.create(app.project.calendars.iter().map(|c| c.uid).max());
+    st.tab = 1;
+    st.week_working[5] = true;
+    st.week_text[5] = "8:00 AM-12:00 PM".into();
+}
+
 struct Scene {
     name: &'static str,
     agile: bool,
@@ -147,6 +211,8 @@ const SCENES: &[Scene] = &[
     Scene { name: "tracking", agile: false, setup: tracking },
     Scene { name: "usage", agile: false, setup: usage },
     Scene { name: "dark", agile: false, setup: dark },
+    Scene { name: "custom", agile: false, setup: custom },
+    Scene { name: "calendars", agile: false, setup: calendars },
 ];
 
 struct Shot {
@@ -193,6 +259,16 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let dir = PathBuf::from(args.next().unwrap_or_else(|| "docs".into()));
     let only: Vec<String> = args.collect();
+    // the print-out as a PDF (no window): `screens docs print`
+    if only.iter().any(|o| o == "print") {
+        let mut app = ProjectFcgApp::new(sample::software_release());
+        app.project.format.show_critical = true;
+        app.recalc();
+        let pdf = projectfcg::app::print::print_pdf(&app, &Default::default());
+        std::fs::write(dir.join("print.pdf"), pdf).expect("write");
+        eprintln!("wrote {}", dir.join("print.pdf").display());
+        return;
+    }
     for sc in SCENES.iter().filter(|s| only.is_empty() || only.iter().any(|o| o == s.name)) {
         let p = if sc.agile { sample::agile_release() } else { sample::software_release() };
         let mut app = ProjectFcgApp::new(p);

@@ -138,6 +138,12 @@ pub enum Command {
     ImportJiraCsv,
     ExportJiraCsv,
     ExportXml,
+    /// File ▸ Print… (Ctrl+P).
+    PrintDlg,
+    /// Project ▸ Custom Fields.
+    CustomFieldsDlg,
+    /// Save the print-out as a PDF (asks for a file name).
+    SavePdf,
     Options,
     Quit,
     // Edit
@@ -209,6 +215,9 @@ pub enum Command {
     ToggleBarText,
     ToggleLate,
     ToggleSlippage,
+    /// The Delete key: deletes the task from the Task Name cell or a whole
+    /// selected row, else clears the field (Project's behaviour).
+    DeleteKey,
     /// Task ▸ Copy Picture: save the view as a PNG.
     CopyPicture,
     ToggleBaselineBars,
@@ -296,6 +305,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Command> {
         (true, false, false, Key::O) => Open,
         (true, false, false, Key::F12) => Open,
         (true, false, false, Key::S) => Save,
+        (true, false, false, Key::P) => PrintDlg,
         (false, false, false, Key::F12) => SaveAs,
         (true, false, false, Key::Q) => Quit,
         // Edit
@@ -317,7 +327,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Command> {
         (false, false, false, Key::F5) => GoTo,
         // Task
         (false, false, false, Key::Insert) => InsertTask,
-        (false, false, false, Key::Delete) => DeleteTasks,
+        (false, false, false, Key::Delete) => DeleteKey,
         (true, false, false, Key::Minus) => DeleteTasks,
         (false, true, true, Key::ArrowRight) => Indent,
         (false, true, true, Key::ArrowLeft) => Outdent,
@@ -387,6 +397,7 @@ pub const SHORTCUT_HELP: &[(&str, &str)] = &[
     ("Ctrl+N", "New project"),
     ("Ctrl+O / Ctrl+F12", "Open"),
     ("Ctrl+S", "Save"),
+    ("Ctrl+P", "Print (or save as PDF)"),
     ("F12", "Save As"),
     ("Ctrl+Z / Ctrl+Y", "Undo / Redo"),
     ("Ctrl+X / C / V", "Cut / Copy / Paste tasks"),

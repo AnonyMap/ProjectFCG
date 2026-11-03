@@ -60,7 +60,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+        # zsync: the .zsync file Gear Lever reads to tell whether there's an update
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev zsync
       - name: AppImage tools
         run: |
           mkdir -p ../tools
@@ -68,16 +69,27 @@ jobs:
           curl -fsSL -o ../tools/runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
           chmod +x ../tools/appimagetool
       - name: Build the AppImage
+        # through bash: files uploaded in GitHub's web page lose their
+        # executable bit, so the script may not be runnable on its own
+        env:
+          # where Gear Lever looks for updates: the latest release's
+          # .zsync, whose SHA-1 it compares with the installed AppImage
+          UPDATE_INFO: gh-releases-zsync|${{ github.repository_owner }}|${{ github.event.repository.name }}|latest|ProjectFCG-*-linux-x86_64.AppImage.zsync
         run: bash packaging/build-appimage.sh
       - name: Smoke test
-        run: ./dist/ProjectFCG-x86_64.AppImage --appimage-extract-and-run --self-test
+        run: |
+          ./dist/ProjectFCG-x86_64.AppImage --appimage-extract-and-run --self-test
+          # the update information Gear Lever reads
+          readelf -p .upd_info dist/ProjectFCG-x86_64.AppImage | grep -q 'gh-releases-zsync|' || { echo "::error::no update information in the AppImage"; exit 1; }
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           out="ProjectFCG-${TAG}-linux-x86_64.AppImage"
           cp dist/ProjectFCG-x86_64.AppImage "$out"
-          gh release upload "$TAG" "$out" --clobber
+          # made after renaming, so the file it points to is the release asset
+          zsyncmake -u "$out" -o "$out.zsync" "$out"
+          gh release upload "$TAG" "$out" "$out.zsync" --clobber
 
   windows:
     name: Windows exe

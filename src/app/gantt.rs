@@ -679,6 +679,8 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
                 if let (Some(s), Some(f)) = (t.calc.start, t.calc.finish) {
                     app.commit_edit();
                     app.select_single(RowRef::Task(u));
+                    // a bar picks the whole task: Delete deletes it
+                    app.row_selected = true;
                     app.gantt_state.drag = Some(BarDrag {
                         uid: u,
                         kind: DragKind::Pending { on_right_edge: right },
@@ -751,6 +753,7 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
                     if !(resp.secondary_clicked() && app.selected.contains(&u)) {
                         app.select_single(RowRef::Task(u));
                     }
+                    app.row_selected = true;
                 }
                 Some(DisplayRow::ProjectSummary) => {}
                 Some(DisplayRow::Group(_)) => {}
@@ -1069,14 +1072,14 @@ pub fn paint_tooltip(ui: &egui::Ui, at: Pos2, text: &str) {
     p.galley(pos + vec2(6.0, 4.0), galley, pal().text);
 }
 
-/// Snap a dragged instant to the timescale (whole days unless zoomed in).
-fn snap(app: &ProjectFcgApp, dt: NaiveDateTime, is_finish: bool) -> NaiveDateTime {
+/// Snap a dragged instant to the timescale (whole days unless zoomed in),
+/// on the task's own working day.
+fn snap(app: &ProjectFcgApp, cal: &crate::calendar::Calendar, dt: NaiveDateTime, is_finish: bool) -> NaiveDateTime {
     let ppd = app.gantt.ppd;
     if ppd >= 110.0 {
         let h = (dt + ChronoDur::minutes(30)).hour();
         dt.date().and_hms_opt(h, 0, 0).unwrap()
     } else {
-        let cal = &app.project.calendar;
         let date = (dt + ChronoDur::hours(12)).date();
         if is_finish {
             let d = date - ChronoDur::days(1);
@@ -1093,23 +1096,26 @@ fn drag_result(app: &ProjectFcgApp, drag: &BarDrag, xf: &Xform) -> (NaiveDateTim
     let dx = drag.cur.x - drag.origin.x;
     let ddays = (dx / xf.ppd) as f64;
     let shift = ChronoDur::seconds((ddays * 86400.0) as i64);
+    // the calendar the task's duration is measured on (its own ∩ its
+    // resources'), so night-shift and 24-hour tasks drag true
+    let i = app.project.index_of_uid(drag.uid).unwrap_or(0);
+    let cal = app.project.scheduled_duration_calendar(i);
     match drag.kind {
         DragKind::Move => {
-            let s = snap(app, drag.orig_start + shift, false);
-            let s = app.project.calendar.snap_start(s, drag.orig_start == drag.orig_finish);
-            let i = app.project.index_of_uid(drag.uid).unwrap_or(0);
+            let s = snap(app, &cal, drag.orig_start + shift, false);
+            let s = cal.snap_start(s, drag.orig_start == drag.orig_finish);
             let t = &app.project.tasks[i];
             let f = if t.calc.is_summary {
                 s + (drag.orig_finish - drag.orig_start)
             } else if t.duration.elapsed {
                 s + ChronoDur::minutes(t.duration.minutes)
             } else {
-                app.project.calendar.add_work(s, t.duration.minutes)
+                cal.add_work(s, t.duration.minutes)
             };
             (s, f)
         }
         DragKind::Resize => {
-            let f = snap(app, drag.orig_finish + shift, true).max(drag.orig_start);
+            let f = snap(app, &cal, drag.orig_finish + shift, true).max(drag.orig_start);
             (drag.orig_start, f)
         }
         _ => (drag.orig_start, drag.orig_finish),
@@ -1138,7 +1144,7 @@ fn paint_drag_preview(app: &ProjectFcgApp, ui: &egui::Ui, p: &Painter, drag: &Ba
             let (x0, x1) = (xf.x(s), xf.x(f).max(xf.x(s) + 2.0));
             let r = Rect::from_min_max(pos2(x0, mid - 6.0), pos2(x1, mid + 6.0));
             p.rect_stroke(r, 0.0, Stroke::new(1.5, pal().drag), StrokeKind::Outside);
-            let dur_min = if t.duration.elapsed { (f - s).num_minutes() } else { app.project.calendar.work_between(s, f) };
+            let dur_min = if t.duration.elapsed { (f - s).num_minutes() } else { app.project.scheduled_duration_calendar(i).work_between(s, f) };
             let title = if drag.kind == DragKind::Move { "Task" } else { "Task (resize)" };
             paint_tooltip(
                 ui,
@@ -1193,7 +1199,7 @@ fn finish_drag(app: &mut ProjectFcgApp, drag: &BarDrag, xf: &Xform, body: Rect, 
             }
             app.edit_project("Change Duration", |p| {
                 let mut d = p.tasks[i].duration;
-                d.minutes = if d.elapsed { (f - s).num_minutes() } else { p.calendar.work_between(s, f) };
+                d.minutes = if d.elapsed { (f - s).num_minutes() } else { p.duration_calendar(i).work_between(s, f) };
                 d.estimated = false;
                 p.set_duration(i, d)
             });
@@ -1206,6 +1212,7 @@ fn finish_drag(app: &mut ProjectFcgApp, drag: &BarDrag, xf: &Xform, body: Rect, 
                     });
                     let u = app.project.tasks[j].uid;
                     app.select_single(RowRef::Task(u));
+                    app.row_selected = true;
                 }
             }
         }

@@ -67,6 +67,9 @@ pub struct TaskInfo {
     pub is_sprint: bool,
     /// % complete comes from the Board (a sprint with tickets).
     pub board_progress: bool,
+    /// Task calendar (base calendar uid) and its resource-calendar switch.
+    pub calendar: Option<u32>,
+    pub ignore_resource_calendars: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -80,7 +83,15 @@ pub struct ProjectInfo {
 
 #[derive(Clone, Debug)]
 pub struct WorkingTime {
+    /// The calendar being edited, and which one it is (`None`: the project calendar).
     pub cal: Calendar,
+    pub target: Option<u32>,
+    /// Edited copies of the other calendars (applied together on OK).
+    pub others: Vec<(Option<u32>, Calendar)>,
+    /// Base calendars to delete on OK.
+    pub deleted: Vec<u32>,
+    pub new_name: String,
+    pub new_template: crate::calendars::Template,
     pub month: NaiveDate,
     pub tab: u8,
     pub week_text: [String; 7],
@@ -159,6 +170,8 @@ pub struct Dialogs {
     pub custom_group: Option<super::view_dialogs::CustomGroupDlg>,
     pub release: Option<super::release_dialogs::ReleaseDlg>,
     pub release_version: Option<super::release_dialogs::ReleaseVersionDlg>,
+    pub print: Option<super::print::PrintDlg>,
+    pub custom_fields: Option<super::view_dialogs::CustomFieldsDlg>,
 }
 
 impl Dialogs {
@@ -194,6 +207,8 @@ impl Dialogs {
             || self.custom_group.is_some()
             || self.release.is_some()
             || self.release_version.is_some()
+            || self.print.is_some()
+            || self.custom_fields.is_some()
             || self.update_tasks.is_some()
             || self.update_project.is_some()
             || self.statistics
@@ -249,6 +264,8 @@ impl Dialogs {
             priority: t.priority,
             is_sprint: t.is_sprint,
             board_progress: p.progress_from_board(row),
+            calendar: t.calendar,
+            ignore_resource_calendars: t.ignore_resource_calendars,
             assigns: p
                 .assignments_of_task(row)
                 .into_iter()
@@ -279,6 +296,11 @@ impl Dialogs {
         let m = p.start.date();
         self.working_time = Some(WorkingTime {
             cal,
+            target: None,
+            others: p.calendars.iter().map(|c| (Some(c.uid), c.calendar.clone())).collect(),
+            deleted: vec![],
+            new_name: String::new(),
+            new_template: crate::calendars::Template::Standard,
             month: NaiveDate::from_ymd_opt(m.year(), m.month(), 1).unwrap(),
             tab: 0,
             week_text,
@@ -678,8 +700,26 @@ fn task_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                         date_field(ui, &mut st.constraint_date, "ti_cd", fallback);
                     });
                     ui.end_row();
-                    ui.label("Task calendar:");
-                    ui.label(format!("{} (project calendar)", app.project.calendar.name));
+                    ui.label("Calendar:");
+                    ui.add_enabled_ui(!st.summary, |ui| {
+                        ui.horizontal(|ui| {
+                            let none = format!("None (the project's: {})", app.project.calendar.name);
+                            let cur = st.calendar.and_then(|u| app.project.base_calendar(u)).map(|c| c.name.clone()).unwrap_or_else(|| none.clone());
+                            egui::ComboBox::from_id_salt("ti_cal").selected_text(cur).width(200.0).show_ui(ui, |ui| {
+                                ui.selectable_value(&mut st.calendar, None, none);
+                                for bc in &app.project.calendars {
+                                    ui.selectable_value(&mut st.calendar, Some(bc.uid), &bc.calendar.name);
+                                }
+                            });
+                            if app.project.calendars.is_empty() {
+                                ui.label(RichText::new("Make calendars in Project ▸ Change Working Time").size(11.0).color(pal().text_dim));
+                            }
+                        });
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.add_enabled(st.calendar.is_some(), egui::Checkbox::new(&mut st.ignore_resource_calendars, "Scheduling ignores resource calendars"))
+                        .on_hover_text("Otherwise the task works only when both its calendar and its resources' calendars do.");
                     ui.end_row();
                     ui.label("WBS code:");
                     ui.label(&st.wbs);
@@ -785,6 +825,9 @@ fn task_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         p.tasks[row].task_type = st.task_type;
         p.tasks[row].effort_driven = st.effort_driven;
         p.tasks[row].priority = st.priority.min(1000);
+        if st.calendar != p.tasks[row].calendar || st.ignore_resource_calendars != p.tasks[row].ignore_resource_calendars {
+            p.set_task_calendar(row, st.calendar, st.ignore_resource_calendars)?;
+        }
         if st.is_sprint != p.tasks[row].is_sprint {
             p.set_sprint(row, st.is_sprint)?;
         }
@@ -806,7 +849,7 @@ fn task_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                 let rtype = p.resources[ri].rtype;
                 let v = match rtype {
                     crate::model::ResourceType::Work => crate::resources::parse_units(&a.units)?,
-                    crate::model::ResourceType::Material => a.units.trim().parse::<f64>().map_err(|_| format!("\"{}\" is not a quantity", a.units))?,
+                    crate::model::ResourceType::Material => crate::duration::parse_number(&a.units).ok_or_else(|| format!("\"{}\" is not a quantity", a.units))?,
                     crate::model::ResourceType::Cost => crate::resources::parse_money(&a.units, &sym)?,
                 };
                 let ai = p.assign(row, a.res_uid, v)?;
@@ -971,11 +1014,149 @@ fn project_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     }
 }
 
+impl WorkingTime {
+    /// Create a calendar from the New calendar fields and edit it.
+    /// `used`: the highest uid the project already has.
+    pub fn create(&mut self, used: Option<u32>) -> Result<u32, String> {
+        let name = self.new_name.trim().to_string();
+        if name.is_empty() {
+            return Err("Give the new calendar a name.".into());
+        }
+        if self.all().iter().any(|(_, c)| c.name.trim().eq_ignore_ascii_case(&name)) {
+            return Err(format!("There's already a calendar called \"{name}\"."));
+        }
+        let mut cal = match self.new_template {
+            crate::calendars::Template::ProjectCalendar => self.all().iter().find(|(u, _)| u.is_none()).map(|(_, c)| (*c).clone()).unwrap_or_else(Calendar::standard),
+            crate::calendars::Template::Standard => Calendar::standard(),
+            crate::calendars::Template::TwentyFourHours => Calendar::twenty_four_hours(),
+            crate::calendars::Template::NightShift => Calendar::night_shift(),
+        };
+        cal.name = name;
+        let top = self.all().iter().filter_map(|(u, _)| *u).chain(self.deleted.iter().copied()).chain(used).max();
+        let uid = top.map_or(2, |m| m + 1).max(2);
+        self.others.push((Some(uid), cal));
+        self.new_name.clear();
+        self.error = None;
+        self.switch_to(Some(uid))?;
+        Ok(uid)
+    }
+
+    /// Delete the calendar being edited (not the project calendar) and go
+    /// back to the project calendar.
+    pub fn delete_current(&mut self) {
+        let Some(u) = self.target else { return };
+        self.deleted.push(u);
+        if let Some(pos) = self.others.iter().position(|(t, _)| t.is_none()) {
+            let (_, proj) = self.others.remove(pos);
+            self.cal = proj;
+            self.target = None;
+            self.load_week();
+        }
+    }
+
+    /// On OK: every calendar, checked (names, working time).
+    pub fn finish(&mut self) -> Result<Vec<(Option<u32>, Calendar)>, String> {
+        self.store_week()?;
+        let all: Vec<(Option<u32>, Calendar)> = self.all().into_iter().map(|(u, c)| (u, c.clone())).collect();
+        for (_, c) in &all {
+            if c.name.trim().is_empty() {
+                return Err("Every calendar needs a name.".into());
+            }
+            if !c.has_any_working_time() {
+                return Err(format!("The calendar \"{}\" must have some working time.", c.name));
+            }
+            if all.iter().filter(|(_, o)| o.name.trim().eq_ignore_ascii_case(c.name.trim())).count() > 1 {
+                return Err(format!("Two calendars are called \"{}\".", c.name.trim()));
+            }
+        }
+        Ok(all)
+    }
+
+    /// Put the Work Weeks fields into the calendar being edited.
+    fn store_week(&mut self) -> Result<(), String> {
+        for k in 0..7 {
+            if !self.week_working[k] {
+                self.cal.week[k] = vec![];
+            } else {
+                match parse_shifts(&self.week_text[k]) {
+                    Ok(s) if !s.is_empty() => self.cal.week[k] = s,
+                    Ok(_) => self.cal.week[k] = Calendar::standard().week[0].clone(),
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn load_week(&mut self) {
+        self.week_text = std::array::from_fn(|i| shifts_to_text(&self.cal.week[i]));
+        self.week_working = std::array::from_fn(|i| !self.cal.week[i].is_empty());
+    }
+
+    /// Edit another calendar, keeping this one's changes.
+    pub fn switch_to(&mut self, target: Option<u32>) -> Result<(), String> {
+        if target == self.target {
+            return Ok(());
+        }
+        self.store_week()?;
+        let Some(pos) = self.others.iter().position(|(u, _)| *u == target) else { return Ok(()) };
+        let (_, next) = self.others.remove(pos);
+        let cur = std::mem::replace(&mut self.cal, next);
+        self.others.push((self.target, cur));
+        self.target = target;
+        self.load_week();
+        Ok(())
+    }
+
+    /// Every calendar in the dialog, the one being edited included.
+    fn all(&self) -> Vec<(Option<u32>, &Calendar)> {
+        let mut v: Vec<(Option<u32>, &Calendar)> = vec![(self.target, &self.cal)];
+        v.extend(self.others.iter().map(|(u, c)| (*u, c)));
+        v.sort_by_key(|(u, _)| u.map_or(0, |x| x as i64 + 1));
+        v
+    }
+}
+
 fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     let Some(mut st) = app.dialogs.working_time.take() else { return };
     let (mut ok, mut cancel) = (false, false);
+    let mut switch: Option<Option<u32>> = None;
+    let mut create = false;
+    let mut delete = false;
     let keys = modal(ctx, "working_time", "Change Working Time", 700.0, |ui| {
-        ui.label(format!("For calendar: {} (Project Calendar)", st.cal.name));
+        ui.horizontal(|ui| {
+            ui.label("For calendar:");
+            let label = |u: Option<u32>, c: &Calendar| if u.is_none() { format!("{} (Project Calendar)", c.name) } else { c.name.clone() };
+            let cur = label(st.target, &st.cal);
+            let choices: Vec<(Option<u32>, String)> = st.all().into_iter().map(|(u, c)| (u, label(u, c))).collect();
+            egui::ComboBox::from_id_salt("wt_target").selected_text(cur).width(240.0).show_ui(ui, |ui| {
+                for (u, l) in &choices {
+                    if ui.selectable_label(*u == st.target, l).clicked() {
+                        switch = Some(*u);
+                    }
+                }
+            });
+            if st.target.is_some() {
+                ui.label("Name:");
+                ui.add(egui::TextEdit::singleline(&mut st.cal.name).desired_width(140.0));
+                if ui.button("Delete").on_hover_text("Tasks using it go back to the project calendar").clicked() {
+                    delete = true;
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("New calendar:");
+            ui.add(egui::TextEdit::singleline(&mut st.new_name).hint_text("name").desired_width(140.0));
+            egui::ComboBox::from_id_salt("wt_tpl").selected_text(st.new_template.label()).width(200.0).show_ui(ui, |ui| {
+                for t in crate::calendars::Template::ALL {
+                    ui.selectable_value(&mut st.new_template, t, t.label());
+                }
+            });
+            if ui.button("Create").clicked() {
+                create = true;
+            }
+        });
+        ui.label(RichText::new("Tasks use a calendar from Task Information ▸ Advanced. The project calendar is used by every other task and by resources.").size(11.0).color(pal().text_dim));
         ui.add_space(4.0);
         ui.horizontal_top(|ui| {
             // month view
@@ -990,6 +1171,17 @@ fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                     }
                 });
                 let first = st.month - chrono::Duration::days(st.month.weekday().num_days_from_sunday() as i64);
+                // the month shows the work week as it's being edited
+                let mut preview = st.cal.clone();
+                for k in 0..7 {
+                    if !st.week_working[k] {
+                        preview.week[k] = vec![];
+                    } else if let Ok(s) = parse_shifts(&st.week_text[k]) {
+                        if !s.is_empty() {
+                            preview.week[k] = s;
+                        }
+                    }
+                }
                 egui::Grid::new("wt_cal").spacing([2.0, 2.0]).show(ui, |ui| {
                     for w in ["S", "M", "T", "W", "T", "F", "S"] {
                         ui.label(RichText::new(w).size(11.0).color(pal().text_dim));
@@ -998,8 +1190,8 @@ fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                     for wk in 0..6 {
                         for dw in 0..7 {
                             let d = first + chrono::Duration::days(wk * 7 + dw);
-                            let is_ex = st.cal.exceptions.iter().any(|e| d >= e.start && d <= e.end);
-                            let working = st.cal.is_working_day(d);
+                            let is_ex = preview.exceptions.iter().any(|e| d >= e.start && d <= e.end);
+                            let working = preview.is_working_day(d);
                             let fill = if is_ex {
                                 pal().cal_exception
                             } else if working {
@@ -1020,7 +1212,7 @@ fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                             r.on_hover_text(format!(
                                 "{}: {}",
                                 fmt_date(d.and_hms_opt(0, 0, 0).unwrap()),
-                                shifts_to_text(st.cal.shifts_on(d))
+                                shifts_to_text(preview.shifts_on(d))
                             ));
                         }
                         ui.end_row();
@@ -1123,34 +1315,47 @@ fn working_time(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     if cancel || keys.esc {
         return;
     }
+    if let Some(t) = switch {
+        if let Err(e) = st.switch_to(t) {
+            st.error = Some(e);
+        }
+    }
+    if create {
+        let used = app.project.calendars.iter().map(|c| c.uid).chain(app.project.tasks.iter().filter_map(|t| t.calendar)).max();
+        if let Err(e) = st.create(used) {
+            st.error = Some(e);
+        }
+    }
+    if delete {
+        st.delete_current();
+    }
     if !ok {
         app.dialogs.working_time = Some(st);
         return;
     }
-    // build week pattern
-    let mut cal = st.cal.clone();
-    for k in 0..7 {
-        if !st.week_working[k] {
-            cal.week[k] = vec![];
-        } else {
-            match parse_shifts(&st.week_text[k]) {
-                Ok(s) if !s.is_empty() => cal.week[k] = s,
-                Ok(_) => cal.week[k] = Calendar::standard().week[0].clone(),
-                Err(e) => {
-                    st.error = Some(e);
-                    app.dialogs.working_time = Some(st);
-                    return;
-                }
+    let all = match st.finish() {
+        Ok(a) => a,
+        Err(e) => {
+            st.error = Some(e);
+            app.dialogs.working_time = Some(st);
+            return;
+        }
+    };
+    let deleted = st.deleted.clone();
+    app.edit_project("Change Working Time", move |p| {
+        for (u, c) in all {
+            match u {
+                None => p.calendar = c,
+                Some(uid) => match p.calendars.iter_mut().find(|b| b.uid == uid) {
+                    Some(b) => b.calendar = c,
+                    None => p.calendars.push(crate::model::BaseCalendar { uid, calendar: c }),
+                },
             }
         }
-    }
-    if !cal.has_any_working_time() {
-        st.error = Some("The calendar must have some working time.".into());
-        app.dialogs.working_time = Some(st);
-        return;
-    }
-    app.edit_project("Change Working Time", move |p| {
-        p.calendar = cal;
+        for u in deleted {
+            let _ = p.delete_base_calendar(u);
+        }
+        p.calendars.sort_by_key(|c| c.uid);
         Ok(())
     });
 }

@@ -286,6 +286,15 @@ pub struct Task {
     /// Baselines 1–10 (Baseline 0 is `baseline`).
     #[serde(default)]
     pub baselines: [Option<Baseline>; 10],
+    /// Task calendar (a base calendar's uid); `None`: the project calendar.
+    #[serde(default)]
+    pub calendar: Option<u32>,
+    /// Scheduling ignores resource calendars (only the task calendar counts).
+    #[serde(default)]
+    pub ignore_resource_calendars: bool,
+    /// Custom field values ("Text1" → value); unset fields aren't stored.
+    #[serde(default)]
+    pub custom: std::collections::BTreeMap<String, crate::custom_fields::CustomValue>,
     #[serde(skip)]
     pub calc: Computed,
 }
@@ -493,6 +502,9 @@ impl Task {
             actual_start: None,
             actual_finish: None,
             baselines: [None; 10],
+            calendar: None,
+            ignore_resource_calendars: false,
+            custom: Default::default(),
             calc: Computed::default(),
         }
     }
@@ -596,12 +608,26 @@ pub struct Project {
     /// Custom filters (View ▸ Filter ▸ New Filter…).
     #[serde(default)]
     pub views: crate::views::Views,
+    /// Base calendars besides the project calendar, for tasks (Night Shift,
+    /// 24 Hours, your own).
+    #[serde(default)]
+    pub calendars: Vec<BaseCalendar>,
+    /// Custom field renames (Project ▸ Custom Fields): "Text1" → "Team".
+    #[serde(default)]
+    pub custom_aliases: std::collections::BTreeMap<String, String>,
     #[serde(skip)]
     pub calc: ProjectCalc,
 }
 
 fn one() -> u32 {
     1
+}
+
+/// A base calendar a task can use (Task Information ▸ Advanced ▸ Calendar).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BaseCalendar {
+    pub uid: u32,
+    pub calendar: Calendar,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -612,8 +638,16 @@ pub struct ProjectCalc {
     pub assignments: Vec<AssignmentCalc>,
     /// Parallel to `Project::resources`.
     pub resources: Vec<ResourceCalc>,
-    /// Effective calendar per resource (project calendar + its changes).
+    /// Effective calendar per resource (project calendar + its changes),
+    /// then the project calendar, base calendars, and resource ∩ task
+    /// calendar intersections (see `Project::build_calendar_index`).
     pub resource_calendars: Vec<crate::calendar::Calendar>,
+    /// Parallel to `Project::assignments`: index into `resource_calendars`
+    /// of the calendar the assignment works on.
+    pub assignment_cal: Vec<usize>,
+    /// Parallel to `Project::tasks`: index of the calendar the task's
+    /// duration is measured on.
+    pub task_cal: Vec<usize>,
     pub total_cost: f64,
     pub total_work: i64,
 }
@@ -640,6 +674,8 @@ impl Project {
             board: Default::default(),
             baseline_saved: [None; 11],
             views: Default::default(),
+            calendars: vec![],
+            custom_aliases: Default::default(),
             calc: ProjectCalc::default(),
         }
     }

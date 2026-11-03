@@ -1,5 +1,6 @@
 //! Table columns ("fields" in Project terms) and their text conversion.
 
+use crate::custom_fields::{CustomField, FieldKind};
 use crate::duration::{fmt_num, DurUnit};
 use crate::model::{fmt_datetime, parse_date, ConstraintType, Project, TaskMode};
 use crate::ops::Field;
@@ -73,6 +74,10 @@ pub enum ColumnId {
     Eac,
     Vac,
     Tcpi,
+    /// The task's calendar (empty: the project calendar).
+    TaskCalendar,
+    /// Text1–10, Number1–10, Flag1–10, Date1–10, Cost1–10.
+    Custom(crate::custom_fields::CustomField),
     /// Baseline 1–10 start / finish.
     BaselineNStart(u8),
     BaselineNFinish(u8),
@@ -111,6 +116,7 @@ impl ColumnId {
         ColumnId::Critical,
         ColumnId::Milestone,
         ColumnId::Notes,
+        ColumnId::TaskCalendar,
         ColumnId::StartSlack,
         ColumnId::FinishSlack,
         ColumnId::BaselineStart,
@@ -172,6 +178,56 @@ impl ColumnId {
         ColumnId::BaselineNFinish(9),
         ColumnId::BaselineNStart(10),
         ColumnId::BaselineNFinish(10),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 1 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 2 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 3 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 4 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 5 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 6 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 7 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 8 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 9 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Text, n: 10 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 1 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 2 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 3 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 4 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 5 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 6 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 7 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 8 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 9 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Number, n: 10 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 1 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 2 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 3 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 4 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 5 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 6 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 7 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 8 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 9 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Flag, n: 10 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 1 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 2 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 3 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 4 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 5 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 6 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 7 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 8 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 9 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Date, n: 10 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 1 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 2 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 3 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 4 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 5 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 6 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 7 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 8 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 9 }),
+        ColumnId::Custom(CustomField { kind: FieldKind::Cost, n: 10 }),
     ];
 
     /// Group for the Insert Column menus.
@@ -179,7 +235,7 @@ impl ColumnId {
         use ColumnId::*;
         match self {
             Indicators | Mode | Name | Notes | Wbs | UniqueId | Milestone | Status => "General",
-            Duration | Start | Finish | Predecessors | Successors | ConstraintType | ConstraintDate | Deadline | EarlyStart | EarlyFinish | LateStart | LateFinish => "Schedule",
+            Duration | Start | Finish | Predecessors | Successors | ConstraintType | ConstraintDate | Deadline | EarlyStart | EarlyFinish | LateStart | LateFinish | TaskCalendar => "Schedule",
             TotalSlack | FreeSlack | StartSlack | FinishSlack | Critical => "Slack & Critical",
             PercentComplete | ActualStart | ActualFinish | ActualDuration | RemainingDuration | ActualWork | RemainingWork | PercentWorkComplete => "Tracking",
             BaselineStart | BaselineFinish | BaselineDuration | BaselineWork | BaselineCost | StartVariance | FinishVariance | DurationVariance => "Baseline & Variance",
@@ -188,10 +244,11 @@ impl ColumnId {
             Bcws | Bcwp | Acwp | Sv | Cv | Spi | Cpi | Bac | Eac | Vac | Tcpi => "Earned Value",
             ResourceNames | ResourceInitials | Work | TaskType | EffortDriven | Overallocated => "Resources",
             Priority | LevelingDelay => "Leveling",
+            Custom(_) => "Custom Fields",
         }
     }
 
-    pub const CATEGORIES: [&'static str; 10] = [
+    pub const CATEGORIES: [&'static str; 11] = [
         "General",
         "Schedule",
         "Slack & Critical",
@@ -202,6 +259,7 @@ impl ColumnId {
         "Earned Value",
         "Resources",
         "Leveling",
+        "Custom Fields",
     ];
 
     /// Project's default Gantt Chart "Entry" table (minus Resource Names).
@@ -225,7 +283,18 @@ impl ColumnId {
         if let ColumnId::BaselineNFinish(n) = self {
             return format!("Baseline{n} Finish");
         }
+        if let ColumnId::Custom(f) = self {
+            return f.name();
+        }
         self.static_title().to_string()
+    }
+
+    /// The heading as this project shows it (custom fields by their alias).
+    pub fn title_in(&self, p: &Project) -> String {
+        match self {
+            ColumnId::Custom(f) => p.custom_title(*f),
+            _ => self.title(),
+        }
     }
 
     fn static_title(&self) -> &'static str {
@@ -276,6 +345,8 @@ impl ColumnId {
             ColumnId::Critical => "Critical",
             ColumnId::Milestone => "Milestone",
             ColumnId::Notes => "Notes",
+            ColumnId::TaskCalendar => "Task Calendar",
+            ColumnId::Custom(_) => "",
             ColumnId::StartSlack => "Start Slack",
             ColumnId::FinishSlack => "Finish Slack",
             ColumnId::BaselineStart => "Baseline Start",
@@ -367,7 +438,13 @@ impl ColumnId {
             | ColumnId::LevelingDelay
             | ColumnId::ActualDuration
             | ColumnId::RemainingDuration
+            | ColumnId::TaskCalendar
             | ColumnId::Notes => EditKind::Text,
+            ColumnId::Custom(f) => match f.kind {
+                FieldKind::Date => EditKind::Date,
+                FieldKind::Flag => EditKind::Choice,
+                _ => EditKind::Text,
+            },
             ColumnId::Start | ColumnId::Finish | ColumnId::ConstraintDate | ColumnId::Deadline | ColumnId::ActualStart | ColumnId::ActualFinish => {
                 EditKind::Date
             }
@@ -385,6 +462,7 @@ impl ColumnId {
             ColumnId::Mode => vec!["Manually Scheduled", "Auto Scheduled"],
             ColumnId::ConstraintType => ConstraintType::ALL.iter().map(|c| c.label()).collect(),
             ColumnId::Milestone | ColumnId::EffortDriven => vec!["Yes", "No"],
+            ColumnId::Custom(f) if f.kind == FieldKind::Flag => vec!["Yes", "No"],
             ColumnId::TaskType => crate::model::TaskType::ALL.iter().map(|t| t.label()).collect(),
             _ => vec![],
         }
@@ -447,6 +525,8 @@ pub fn cell_text(p: &Project, row: usize, col: ColumnId) -> String {
         ColumnId::Critical => if c.critical { "Yes" } else { "No" }.into(),
         ColumnId::Milestone => if t.is_milestone() { "Yes" } else { "No" }.into(),
         ColumnId::Notes => t.notes.lines().next().unwrap_or("").to_string(),
+        ColumnId::TaskCalendar => t.calendar.and_then(|u| p.base_calendar(u)).map(|c| c.name.clone()).unwrap_or_default(),
+        ColumnId::Custom(f) => p.custom_text(row, f),
         ColumnId::StartSlack => dur_days(p, c.start_slack),
         ColumnId::FinishSlack => dur_days(p, c.finish_slack),
         ColumnId::BaselineStart => opt_date(bl.map(|b| b.start)),
@@ -549,6 +629,15 @@ pub fn edit_text(p: &Project, row: usize, col: ColumnId) -> String {
         ColumnId::ActualFinish => t.actual_finish.map(fmt_datetime).unwrap_or_default(),
         ColumnId::PercentComplete => fmt_num(t.percent_complete),
         ColumnId::Notes => t.notes.clone(),
+        ColumnId::TaskCalendar => t.calendar.and_then(|u| p.base_calendar(u)).map(|c| c.name.clone()).unwrap_or_default(),
+        ColumnId::Custom(f) => match (p.custom_value(row, f), f.kind) {
+            (None, FieldKind::Number | FieldKind::Cost | FieldKind::Date | FieldKind::Text) => String::new(),
+            // the full value, so Fill Down and copy don't round it
+            (Some(crate::custom_fields::CustomValue::Number(v)), _) => format!("{v}"),
+            (Some(crate::custom_fields::CustomValue::Cost(v)), _) => format!("{v}"),
+            (Some(crate::custom_fields::CustomValue::Date(d)), _) => fmt_datetime(*d),
+            _ => p.custom_text(row, f),
+        },
         ColumnId::FixedCost => crate::duration::fmt_num(t.fixed_cost),
         ColumnId::Mode => match t.mode {
             TaskMode::Auto => "Auto Scheduled".into(),
@@ -633,6 +722,24 @@ pub fn set_cell(p: &mut Project, row: usize, col: ColumnId, text: &str) -> Resul
             p.tasks[row].notes = text.to_string();
             Ok(())
         }
+        ColumnId::Custom(f) => p.set_custom(row, f, text),
+        ColumnId::TaskCalendar => {
+            let keep = p.tasks[row].ignore_resource_calendars;
+            if txt.is_empty() || txt.eq_ignore_ascii_case("none") || txt.eq_ignore_ascii_case(p.calendar.name.trim()) {
+                return p.set_task_calendar(row, None, false);
+            }
+            match p.calendar_by_name(txt) {
+                Some(u) => p.set_task_calendar(row, Some(u), keep),
+                None => {
+                    let names: Vec<String> = p.calendars.iter().map(|c| c.calendar.name.clone()).collect();
+                    Err(if names.is_empty() {
+                        "There are no task calendars yet: make one in Project ▸ Change Working Time.".into()
+                    } else {
+                        format!("No calendar called \"{txt}\". Calendars: {}.", names.join(", "))
+                    })
+                }
+            }
+        }
         ColumnId::FixedCost => {
             p.tasks[row].fixed_cost = crate::resources::parse_money(txt, &p.settings.currency_symbol)?;
             Ok(())
@@ -658,6 +765,9 @@ pub fn set_cell(p: &mut Project, row: usize, col: ColumnId, text: &str) -> Resul
         }
         ColumnId::LevelingDelay => {
             let d = p.parse_duration(txt)?;
+            if d.elapsed {
+                return Err("Leveling delay is working time: type it as days or hours (3d, not 3ed).".into());
+            }
             if p.is_summary(row) {
                 return Err("Leveling delay applies to subtasks.".into());
             }
@@ -683,13 +793,21 @@ pub fn set_cell(p: &mut Project, row: usize, col: ColumnId, text: &str) -> Resul
                 return Err("Enter actuals on subtasks; summaries roll them up.".into());
             }
             let d = p.parse_duration(txt)?;
+            // actuals are in the task's own kind of time
+            if d.elapsed != p.tasks[row].duration.elapsed {
+                return Err(if d.elapsed {
+                    "This task's duration is working time, so its actuals are too: type 3d, not 3ed.".into()
+                } else {
+                    "This task's duration is elapsed time, so its actuals are too: type 3ed.".into()
+                });
+            }
             if col == ColumnId::ActualDuration {
                 p.set_actual_duration(row, d.minutes)
             } else {
                 p.set_remaining_duration(row, d.minutes)
             }
         }
-        _ => Err(format!("The {} field is calculated and can't be edited.", col.title())),
+        _ => Err(format!("The {} field is calculated and can't be edited.", col.title_in(p))),
     }
 }
 
@@ -714,6 +832,8 @@ pub fn reset_cell(p: &mut Project, row: usize, col: ColumnId) -> Result<(), Stri
             p.tasks[row].notes.clear();
             Ok(())
         }
+        ColumnId::TaskCalendar => p.set_task_calendar(row, None, false),
+        ColumnId::Custom(f) => p.set_custom(row, f, ""),
         ColumnId::PercentComplete => p.set_field_text(row, Field::PercentComplete, "0"),
         ColumnId::Duration => p.set_field_text(row, Field::Duration, "1d?"),
         _ => Ok(()),
@@ -721,7 +841,7 @@ pub fn reset_cell(p: &mut Project, row: usize, col: ColumnId) -> Result<(), Stri
 }
 
 /// Insert Column menu, grouped by category. Returns the column picked.
-pub fn insert_column_menu(ui: &mut egui::Ui, present: &[ColumnId]) -> Option<ColumnId> {
+pub fn insert_column_menu(ui: &mut egui::Ui, present: &[ColumnId], p: &Project) -> Option<ColumnId> {
     let mut picked = None;
     for cat in ColumnId::CATEGORIES {
         let cols: Vec<ColumnId> = ColumnId::ALL.iter().copied().filter(|c| c.category() == cat && !present.contains(c)).collect();
@@ -730,7 +850,9 @@ pub fn insert_column_menu(ui: &mut egui::Ui, present: &[ColumnId]) -> Option<Col
         }
         ui.menu_button(cat, |ui| {
             for c in cols {
-                if ui.button(c.title()).clicked() {
+                let t = c.title_in(p);
+                let label = if t != c.title() { format!("{t} ({})", c.title()) } else { t };
+                if ui.button(label).clicked() {
                     picked = Some(c);
                     ui.close();
                 }

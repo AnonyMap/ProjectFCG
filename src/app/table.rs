@@ -122,6 +122,8 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
                     if let Some(k) = col {
                         app.active_col = k;
                     }
+                    // the row header selects whole rows; a cell selects cells
+                    app.row_selected = col.is_none();
                     let uid = match r {
                         RowRef::Task(u) => Some(u),
                         RowRef::Blank => None,
@@ -434,6 +436,18 @@ fn paint_cell(app: &ProjectFcgApp, p: &Painter, cell: Rect, i: usize, col: Colum
                 });
                 x += 13.0;
             }
+            if let Some(cal) = t.calendar.and_then(|u| proj.base_calendar(u)) {
+                // a small calendar page
+                let r = Rect::from_center_size(pos2(x + 5.0, cy), vec2(9.0, 9.0));
+                clip.rect_stroke(r, 1.0, Stroke::new(1.0, pal().glyph), StrokeKind::Inside);
+                clip.rect_filled(Rect::from_min_size(r.min, vec2(9.0, 2.5)), 1.0, pal().glyph);
+                tips.push(format!(
+                    "The calendar \"{}\" is assigned to the task{}.",
+                    cal.name,
+                    if t.ignore_resource_calendars { "; scheduling ignores resource calendars" } else { "" }
+                ));
+                x += 13.0;
+            }
             if let Some(r) = &t.recurrence {
                 icon_recurring(&clip, pos2(x + 5.0, cy));
                 tips.push(format!("Recurring task: {}. Task Information edits the series.", r.describe()));
@@ -663,7 +677,7 @@ fn paint_header(app: &mut ProjectFcgApp, ui: &mut egui::Ui, painter: &Painter, r
     for k in 0..app.columns.len() {
         let cell = Rect::from_min_max(pos2(lay.col_x[k], lay.header.top()), pos2(lay.col_x[k + 1], lay.header.bottom()));
         let id = app.columns[k].id;
-        let title = id.title();
+        let title = id.title_in(&app.project);
         let active = k == app.active_col;
         if active {
             clip.rect_filled(cell, 0.0, pal().header_hover);
@@ -694,7 +708,7 @@ fn paint_header(app: &mut ProjectFcgApp, ui: &mut egui::Ui, painter: &Painter, r
             ui.separator();
             ui.menu_button("Insert Column", |ui| {
                 let present: Vec<_> = app.columns.iter().map(|s| s.id).collect();
-                if let Some(c) = super::columns::insert_column_menu(ui, &present) {
+                if let Some(c) = super::columns::insert_column_menu(ui, &present, &app.project) {
                     app.columns.insert(k, super::ColumnState { id: c, width: c.default_width() });
                     ui.close();
                 }

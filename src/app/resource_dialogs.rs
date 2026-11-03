@@ -197,7 +197,7 @@ fn assign_window(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         let text = st.units.get(&uid).cloned().unwrap_or_default();
         let val = match rtype {
             ResourceType::Work => parse_units(&text),
-            ResourceType::Material => text.trim().parse::<f64>().map_err(|_| format!("\"{text}\" is not a quantity")),
+            ResourceType::Material => crate::duration::parse_number(&text).ok_or_else(|| format!("\"{text}\" is not a quantity")),
             ResourceType::Cost => parse_money(&text, &sym),
         };
         match (what, val) {

@@ -14,6 +14,7 @@ pub enum Mode {
     ExportJiraCsv,
     ExportXml,
     ExportPng,
+    ExportPdf,
 }
 
 impl Mode {
@@ -72,6 +73,7 @@ impl FileBrowser {
             Mode::ExportCsv | Mode::ImportJiraCsv | Mode::ExportJiraCsv => "csv",
             Mode::ExportXml => "xml",
             Mode::ExportPng => "png",
+            Mode::ExportPdf => "pdf",
             _ => crate::io::EXTENSION,
         }
     }
@@ -110,6 +112,7 @@ impl FileBrowser {
             Mode::ExportJiraCsv => "Export Board as Jira CSV",
             Mode::ExportXml => "Save as Project XML",
             Mode::ExportPng => "Copy Picture",
+            Mode::ExportPdf => "Save as PDF",
         };
         let mut outcome = Outcome::Open;
         let mut go_to: Option<PathBuf> = None;

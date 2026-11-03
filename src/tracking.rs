@@ -151,7 +151,7 @@ impl Project {
         if f < start {
             return Err("The actual finish can't be before the actual start.".into());
         }
-        let mins = self.calendar.work_between(start, f);
+        let mins = self.duration_calendar(row).work_between(start, f);
         if !self.tasks[row].duration.elapsed && mins != self.tasks[row].duration.minutes {
             let mut d = self.tasks[row].duration;
             d.minutes = mins.max(0);
@@ -178,7 +178,12 @@ impl Project {
             self.set_duration(row, d)?;
             return self.set_percent_complete(row, 100.0);
         }
-        let pct = if dur > 0 { minutes as f64 / dur as f64 * 100.0 } else { 100.0 };
+        if dur == 0 {
+            // a milestone with no actual time: its progress doesn't change
+            // (marking it done is % Complete's job)
+            return Ok(());
+        }
+        let pct = minutes as f64 / dur as f64 * 100.0;
         self.set_percent_complete(row, (pct * 100.0).round() / 100.0)
     }
 
@@ -221,11 +226,12 @@ impl Project {
         if at <= s {
             return 0.0;
         }
-        let total = self.calendar.work_between(s, f);
+        let cal = self.scheduled_duration_calendar(row);
+        let total = cal.work_between(s, f);
         if total <= 0 {
             return 100.0;
         }
-        (self.calendar.work_between(s, at) as f64 / total as f64 * 100.0).clamp(0.0, 100.0)
+        (cal.work_between(s, at) as f64 / total as f64 * 100.0).clamp(0.0, 100.0)
     }
 
     /// Project ▸ Update Project. Returns the rows that changed. Progress is
@@ -258,18 +264,31 @@ impl Project {
             }
         }
         if let Some(after) = reschedule_after {
-            for row in 0..self.tasks.len() {
-                let t = &self.tasks[row];
-                if t.calc.is_summary || t.actual_start.is_some() || t.mode != crate::model::TaskMode::Auto {
-                    continue;
-                }
-                if t.calc.start.is_some_and(|s| s < after) && self.set_constraint(row, crate::model::ConstraintType::SNET, Some(after)).is_ok() {
-                    changed.push(row);
-                }
-            }
+            changed.extend(self.reschedule_uncompleted(after, rows));
         }
         changed.sort();
         changed.dedup();
+        changed
+    }
+
+    /// Update Project ▸ Reschedule uncompleted work to start after: unstarted
+    /// auto-scheduled tasks (all, or `rows`) that would start earlier get a
+    /// Start No Earlier Than `after`.
+    pub fn reschedule_uncompleted(&mut self, after: NaiveDateTime, rows: Option<&[usize]>) -> Vec<usize> {
+        let targets: Vec<usize> = match rows {
+            Some(r) => r.iter().copied().filter(|&i| i < self.tasks.len()).collect(),
+            None => (0..self.tasks.len()).collect(),
+        };
+        let mut changed = vec![];
+        for row in targets {
+            let t = &self.tasks[row];
+            if t.calc.is_summary || t.actual_start.is_some() || t.mode != crate::model::TaskMode::Auto {
+                continue;
+            }
+            if t.calc.start.is_some_and(|s| s < after) && self.set_constraint(row, crate::model::ConstraintType::SNET, Some(after)).is_ok() {
+                changed.push(row);
+            }
+        }
         changed
     }
 
@@ -371,9 +390,10 @@ pub(crate) fn compute_tracking(p: &mut Project, acost: &[f64], parents: &[Option
             } else if status <= b.start {
                 0.0
             } else {
-                let total = p.calendar.work_between(b.start, b.finish);
+                let cal = p.scheduled_duration_calendar(i);
+                let total = cal.work_between(b.start, b.finish);
                 if total > 0 {
-                    p.calendar.work_between(b.start, status) as f64 / total as f64
+                    cal.work_between(b.start, status) as f64 / total as f64
                 } else {
                     1.0
                 }
@@ -422,9 +442,10 @@ pub fn progress_point(p: &Project, row: usize, at: NaiveDateTime) -> Option<Naiv
         return Some(at);
     }
     // the point reached by the work done
-    let total = p.calendar.work_between(s, f);
+    let cal = p.scheduled_duration_calendar(row);
+    let total = cal.work_between(s, f);
     let done = (total as f64 * pct / 100.0).round() as i64;
-    Some(if done <= 0 { s } else { p.calendar.add_work(p.calendar.next_working_start(s), done) })
+    Some(if done <= 0 { s } else { cal.add_work(cal.next_working_start(s), done) })
 }
 
 /// Working days in a date range (for the Update Tasks dialog's hints).

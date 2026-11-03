@@ -344,11 +344,34 @@ pub fn to_xml(p: &Project) -> String {
     w.opt("StatusDate", p.status_date.map(dt));
     w.el("NewTasksAreManual", b(!s.new_tasks_auto));
 
+    // ---- custom fields in use, with their names ----
+    let custom_in_use = p.custom_fields_in_use();
+    if !custom_in_use.is_empty() {
+        w.open("ExtendedAttributes");
+        for f in &custom_in_use {
+            w.open("ExtendedAttribute");
+            w.el("FieldID", f.field_id().to_string());
+            w.el("FieldName", f.name());
+            if let Some(a) = p.custom_aliases.get(&f.name()).filter(|a| !a.trim().is_empty()) {
+                w.el("Alias", a);
+            }
+            w.close("ExtendedAttribute");
+        }
+        w.close("ExtendedAttributes");
+    }
+
     // ---- calendars: 1 = project, then one per work resource ----
     w.open("Calendars");
     write_calendar(&mut w, 1, &p.calendar.name, None, Some(&p.calendar.week), &p.calendar.exceptions);
     let mut res_cal: HashMap<u32, u32> = HashMap::new();
     let mut next_cal = 2;
+    // task calendars: base calendars in their own right
+    let mut base_cal: HashMap<u32, u32> = HashMap::new();
+    for bc in &p.calendars {
+        write_calendar(&mut w, next_cal, &bc.calendar.name, None, Some(&bc.calendar.week), &bc.calendar.exceptions);
+        base_cal.insert(bc.uid, next_cal);
+        next_cal += 1;
+    }
     for r in p.resources.iter().filter(|r| r.rtype == ResourceType::Work) {
         write_calendar(&mut w, next_cal, &r.name, Some(1), r.week.as_ref(), &r.exceptions);
         res_cal.insert(r.uid, next_cal);
@@ -371,6 +394,7 @@ pub fn to_xml(p: &Project) -> String {
     w.open("Tasks");
     for (i, t) in p.tasks.iter().enumerate() {
         let c = &t.calc;
+        let task_cal_uid: i64 = t.calendar.and_then(|u| base_cal.get(&u)).map(|&x| x as i64).unwrap_or(-1);
         w.open("Task");
         w.el("UID", t.uid.to_string());
         w.el("ID", (i + 1).to_string());
@@ -430,12 +454,12 @@ pub fn to_xml(p: &Project) -> String {
         match floor {
             Some(f) => {
                 w.el("ConstraintType", constraint_code(ConstraintType::SNET).to_string());
-                w.el("CalendarUID", "-1");
+                w.el("CalendarUID", task_cal_uid.to_string());
                 w.el("ConstraintDate", dt(f));
             }
             None => {
                 w.el("ConstraintType", constraint_code(t.constraint).to_string());
-                w.el("CalendarUID", "-1");
+                w.el("CalendarUID", task_cal_uid.to_string());
                 if t.constraint.needs_date() {
                     w.opt("ConstraintDate", t.constraint_date.map(dt));
                 }
@@ -445,6 +469,9 @@ pub fn to_xml(p: &Project) -> String {
         if t.leveling_delay != 0 {
             w.el("LevelingDelay", (t.leveling_delay * 10).to_string());
             w.el("LevelingDelayFormat", "7");
+        }
+        if task_cal_uid >= 0 {
+            w.el("IgnoreResourceCalendar", b(t.ignore_resource_calendars));
         }
         if !t.notes.is_empty() {
             w.el("Notes", &t.notes);
@@ -466,6 +493,22 @@ pub fn to_xml(p: &Project) -> String {
                 }
             }
             w.close("PredecessorLink");
+        }
+        for (k, v) in &t.custom {
+            let Some(f) = crate::custom_fields::CustomField::parse(k) else { continue };
+            use crate::custom_fields::CustomValue as V;
+            let value = match v {
+                V::Text(s) => s.clone(),
+                V::Number(x) => format!("{x}"),
+                // currency in hundredths, as Project writes custom costs
+                V::Cost(x) => format!("{}", (x * 100.0).round()),
+                V::Flag(b) => if *b { "1" } else { "0" }.to_string(),
+                V::Date(d) => dt(*d),
+            };
+            w.open("ExtendedAttribute");
+            w.el("FieldID", f.field_id().to_string());
+            w.el("Value", value);
+            w.close("ExtendedAttribute");
         }
         for n in 0..=10 {
             if let Some(bl) = t.baseline_slot(n) {
@@ -879,6 +922,31 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         warnings.push("The project was scheduled from its finish date; ProjectFCG schedules forward from the start date.".into());
     }
 
+    // ---- custom field names (task fields we know; others are reported) ----
+    let mut unknown_fields: Vec<String> = vec![];
+    if let Some(ea) = kid(root, "ExtendedAttributes") {
+        for a in kids(ea, "ExtendedAttribute") {
+            let id = int(a, "FieldID").filter(|v| (0..=u32::MAX as i64).contains(v)).map(|v| v as u32);
+            match id.and_then(crate::custom_fields::CustomField::from_field_id) {
+                Some(f) => {
+                    if let Some(al) = text(a, "Alias").map(str::trim).filter(|s| !s.is_empty()) {
+                        let _ = p.set_custom_alias(f, al);
+                    }
+                }
+                None => {
+                    // resource and assignment fields share the element; only
+                    // task fields (0x0B40…) we can't hold are worth a mention
+                    if id.is_some_and(|i| (0x0B40_0000..0x0B41_0000).contains(&i)) {
+                        let name = text(a, "Alias").or_else(|| text(a, "FieldName")).unwrap_or("?").to_string();
+                        if !unknown_fields.contains(&name) {
+                            unknown_fields.push(name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- calendars ----
     let mut cals: HashMap<u32, RawCal> = HashMap::new();
     if let Some(cs) = kid(root, "Calendars") {
@@ -888,7 +956,8 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         }
     }
     let proj_cal = int(root, "CalendarUID").filter(|v| (0..=999_999_999).contains(v)).map(|u| u as u32).filter(|u| cals.contains_key(u)).or_else(|| cals.iter().filter(|(_, c)| c.base.is_none()).map(|(u, _)| *u).min());
-    if let Some(u) = proj_cal {
+    // a calendar with what it inherits from its bases
+    let build = |u: u32| -> Calendar {
         let week = resolve_week(&cals, u);
         // exceptions of the calendar and its bases
         // base calendars first, so the derived calendar's exceptions win
@@ -902,8 +971,13 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
             cur = c.base;
         }
         let ex: Vec<CalendarException> = chain.iter().rev().flat_map(|c| c.exceptions.iter().cloned()).collect();
-        p.calendar = Calendar { name: cals[&u].name.clone(), week, exceptions: ex };
+        Calendar { name: cals[&u].name.clone(), week, exceptions: ex }
+    };
+    if let Some(u) = proj_cal {
+        p.calendar = build(u);
     }
+    // task calendars become base calendars (file uid → ours)
+    let mut task_cal_map: HashMap<u32, u32> = HashMap::new();
 
     // ---- tasks ----
     let mut rows: Vec<(i64, Task, Option<NaiveDateTime>)> = vec![];
@@ -966,8 +1040,52 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
                 let m = (ld / 10).clamp(0, MAX_MINUTES);
                 t.leveling_delay = if el { m * p.settings.durations.minutes_per_day / 1440 } else { m };
             }
-            if int(tn, "CalendarUID").is_some_and(|c| c >= 0) {
-                task_cals += 1;
+            if let Some(cu) = int(tn, "CalendarUID").filter(|c| (0..=999_999_999).contains(c)).map(|c| c as u32).filter(|c| Some(*c) != proj_cal && cals.contains_key(c)) {
+                let ours = match task_cal_map.get(&cu) {
+                    Some(&o) => o,
+                    None => {
+                        let mut cal = build(cu);
+                        if !cal.has_any_working_time() {
+                            task_cals += 1;
+                            cal = p.calendar.clone();
+                        }
+                        // unique names: Project allows a base and a resource calendar to share one
+                        let mut name = cal.name.trim().to_string();
+                        if name.is_empty() {
+                            name = format!("Calendar {cu}");
+                        }
+                        let taken = |n: &str, p: &Project| p.calendar.name.eq_ignore_ascii_case(n) || p.calendars.iter().any(|c| c.calendar.name.eq_ignore_ascii_case(n));
+                        let base_name = name.clone();
+                        let mut k = 2;
+                        while taken(&name, &p) {
+                            name = format!("{base_name} ({k})");
+                            k += 1;
+                        }
+                        cal.name = name;
+                        let uid = p.calendars.iter().map(|c| c.uid + 1).max().unwrap_or(2).max(2);
+                        p.calendars.push(crate::model::BaseCalendar { uid, calendar: cal });
+                        task_cal_map.insert(cu, uid);
+                        uid
+                    }
+                };
+                t.calendar = Some(ours);
+                t.ignore_resource_calendars = flag(tn, "IgnoreResourceCalendar").unwrap_or(false);
+            }
+            for ea in kids(tn, "ExtendedAttribute") {
+                let Some(f) = int(ea, "FieldID").filter(|v| (0..=u32::MAX as i64).contains(v)).and_then(|v| crate::custom_fields::CustomField::from_field_id(v as u32)) else { continue };
+                let Some(v) = text(ea, "Value") else { continue };
+                use crate::custom_fields::{CustomValue as V, FieldKind as K};
+                let num = || v.trim().replace(',', ".").parse::<f64>().ok().filter(|x| x.is_finite() && x.abs() < 1e15);
+                let val = match f.kind {
+                    K::Text => (!v.is_empty()).then(|| V::Text(v.to_string())),
+                    K::Number => num().filter(|x| *x != 0.0).map(V::Number),
+                    K::Cost => num().filter(|x| *x != 0.0).map(|x| V::Cost(x / 100.0)),
+                    K::Flag => (v.trim() == "1" || v.trim().eq_ignore_ascii_case("true")).then_some(V::Flag(true)),
+                    K::Date => chrono::NaiveDateTime::parse_from_str(v.trim(), "%Y-%m-%dT%H:%M:%S").ok().map(V::Date),
+                };
+                if let Some(val) = val {
+                    t.custom.insert(f.name(), val);
+                }
             }
             for l in kids(tn, "PredecessorLink") {
                 if flag(l, "CrossProject") == Some(true) {
@@ -1008,12 +1126,11 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         }
     }
     rows.sort_by_key(|r| r.0);
+    if !unknown_fields.is_empty() {
+        warnings.push(format!("Custom fields ProjectFCG doesn't have (outline codes, Text11–30, Duration, Start/Finish fields …) were left out: {}.", unknown_fields.join(", ")));
+    }
     if task_cals > 0 {
-        warnings.push(if task_cals == 1 {
-            "1 task used a task calendar; ProjectFCG schedules it on the project and resource calendars.".to_string()
-        } else {
-            format!("{task_cals} tasks used task calendars; ProjectFCG schedules them on the project and resource calendars.")
-        });
+        warnings.push(format!("{task_cals} task calendar{} had no working time; the project calendar is used instead.", if task_cals == 1 { "" } else { "s" }));
     }
     if dup_uids > 0 {
         warnings.push(format!("{dup_uids} task{} repeated another task's UID and {} skipped.", if dup_uids == 1 { "" } else { "s" }, if dup_uids == 1 { "was" } else { "were" }));
