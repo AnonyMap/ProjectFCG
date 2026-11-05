@@ -86,6 +86,8 @@ fn repeated_panics_go_back_to_the_last_plan_that_drew() {
     let mut app = ProjectFcgApp::new(plan());
     let ctx = egui::Context::default();
     app.view.main = MainView::ResourceSheet;
+    // a plan counts as good once a frame has drawn it after it changed
+    frame(&mut app, &ctx);
     frame(&mut app, &ctx);
     // something left the plan in a state that keeps failing
     app.project.tasks[1].name = "poison".into();
