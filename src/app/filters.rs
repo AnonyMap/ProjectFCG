@@ -223,6 +223,9 @@ pub struct Compiled {
     /// `None`: the value doesn't parse for this field, so nothing matches.
     want: Option<Value>,
     hi: Option<Value>,
+    /// Resource Names of every row, lower-cased, built in one pass over the
+    /// assignments (per row it would scan them all: quadratic).
+    names: Option<Vec<String>>,
 }
 
 impl Compiled {
@@ -240,13 +243,23 @@ impl Compiled {
         };
         let want = like.as_ref().and_then(|l| parse_like(p, l, &c.value));
         let hi = like.as_ref().filter(|_| c.test.two_values()).and_then(|l| parse_like(p, l, &c.value2));
-        Compiled { col, test: c.test, or: c.or, needle: c.value.trim().to_lowercase(), want, hi }
+        let names = (col == Some(ColumnId::ResourceNames) && matches!(c.test, Test::Contains | Test::NotContains)).then(|| {
+            let mut by_task: std::collections::HashMap<u32, Vec<usize>> = std::collections::HashMap::new();
+            for (ai, a) in p.assignments.iter().enumerate() {
+                by_task.entry(a.task).or_default().push(ai);
+            }
+            p.tasks.iter().map(|t| by_task.get(&t.uid).map(|v| p.resource_names_of(v).to_lowercase()).unwrap_or_default()).collect()
+        });
+        Compiled { col, test: c.test, or: c.or, needle: c.value.trim().to_lowercase(), want, hi, names }
     }
 
     pub fn matches(&self, p: &Project, row: usize) -> bool {
         let Some(col) = self.col else { return false };
         if matches!(self.test, Test::Contains | Test::NotContains) {
-            let has = cell_text(p, row, col).to_lowercase().contains(&self.needle);
+            let has = match self.names.as_ref().and_then(|n| n.get(row)) {
+                Some(s) => s.contains(&self.needle),
+                None => cell_text(p, row, col).to_lowercase().contains(&self.needle),
+            };
             return has == (self.test == Test::Contains);
         }
         let Some(want) = &self.want else { return false };

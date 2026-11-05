@@ -12,6 +12,7 @@ pub mod format_dialogs;
 pub mod gantt;
 pub mod inspector;
 pub mod interchange;
+pub mod jobs;
 pub mod sprint_dialogs;
 pub mod prefs;
 pub mod print;
@@ -289,6 +290,8 @@ pub struct ProjectFcgApp {
     pub prefs_path: Option<PathBuf>,
     /// Crash safety: caught panics, AutoRecover, crash reports.
     pub safety: safety::Safety,
+    /// Leveling running in the background (large plans).
+    pub leveling_job: Option<jobs::LevelJob>,
 }
 
 impl Default for ProjectFcgApp {
@@ -365,6 +368,7 @@ impl ProjectFcgApp {
             prefs: prefs::Prefs::default(),
             prefs_path: None,
             safety: Default::default(),
+            leveling_job: None,
         };
         app.scroll_gantt_to(app.project.start);
         if let Some(t) = app.project.tasks.first() {
@@ -414,6 +418,10 @@ impl ProjectFcgApp {
         f: impl FnOnce(&mut Project) -> Result<T, String>,
     ) -> Option<T> {
         use std::panic::{catch_unwind, AssertUnwindSafe};
+        if self.leveling_job.is_some() {
+            self.error("Leveling is running. Wait for it or cancel it first.");
+            return None;
+        }
         let before = self.project.clone();
         let r = catch_unwind(AssertUnwindSafe(|| {
             let v = f(&mut self.project);
@@ -876,6 +884,11 @@ impl ProjectFcgApp {
 
     pub fn execute(&mut self, cmd: Command, ctx: &egui::Context) {
         use Command::*;
+        // nothing may change the plan while a copy of it is being leveled
+        if self.leveling_job.is_some() {
+            self.set_status("Leveling is running. Wait for it or cancel it first.");
+            return;
+        }
         // In the Resource Sheet, row commands act on resources.
         if self.view.main == MainView::ResourceSheet {
             match cmd {
@@ -1569,15 +1582,10 @@ impl ProjectFcgApp {
             }
             LevelAll | LevelSelection => {
                 let rows = if cmd == LevelSelection { Some(self.selected_rows_sorted()) } else { None };
-                if let Some(res) = self.edit_project("Level Resources", |p| Ok(crate::leveling::level(p, rows.as_deref()))) {
-                    let mut msg = format!("Leveling delayed {} task(s).", res.delayed.len());
-                    if res.unresolved.is_empty() {
-                        self.set_status(msg);
-                    } else {
-                        msg.push_str("\n\nCould not resolve:\n• ");
-                        msg.push_str(&res.unresolved.join("\n• "));
-                        self.dialogs.message = Some(("Resource Leveling".into(), msg));
-                    }
+                if self.level_in_background() {
+                    self.start_level_job(rows);
+                } else if let Some(res) = self.edit_project("Level Resources", |p| Ok(crate::leveling::level(p, rows.as_deref()))) {
+                    self.report_leveling(&res);
                 }
             }
             ClearLeveling => {
@@ -2012,6 +2020,7 @@ impl ProjectFcgApp {
         if let Some(a) = self.deferred_action.take() {
             self.run_pending(a, &ctx);
         }
+        self.poll_jobs(&ctx);
         // Window close: ask to save.
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.dirty {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
