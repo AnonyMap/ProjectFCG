@@ -311,8 +311,7 @@ impl ProjectFcgApp {
                 self.replace_project(p, None);
                 self.dirty = true;
                 rec.remove(&o.session);
-                let from = o.meta.original.as_ref().map(|p| format!(" of {}", p.display())).unwrap_or_default();
-                self.set_status(&format!("Recovered “{}”{from}, autosaved {}. Save it to keep it.", o.meta.title, o.meta.saved_at.format("%b %-d %-I:%M %p")));
+                self.set_status(format!("Recovered “{}” (autosaved {}). Save it to keep it.", o.meta.title, o.meta.saved_at.format("%b %-d, %-I:%M %p")));
             }
             Err(e) => self.error(format!("Couldn't open the recovery copy: {e}")),
         }
@@ -373,35 +372,41 @@ impl ProjectFcgApp {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_TOP, [0.0, 80.0])
                 .show(ctx, |ui| {
-                    ui.set_max_width(520.0);
+                    ui.set_width(520.0);
                     ui.label("ProjectFCG didn't close normally last time. AutoRecover kept a copy of the unsaved work:");
                     ui.add_space(6.0);
-                    egui::Grid::new("recover-list").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
-                        for (i, o) in self.safety.offers.iter().enumerate() {
-                            ui.vertical(|ui| {
-                                ui.strong(&o.meta.title);
-                                let from = o.meta.original.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "never saved".into());
-                                ui.small(format!("{from} · autosaved {}", o.meta.saved_at.format("%a %b %-d, %-I:%M %p")));
-                                if let Some(orig) = &o.meta.original {
-                                    let newer = std::fs::metadata(orig)
-                                        .and_then(|m| m.modified())
-                                        .ok()
-                                        .map(|t| chrono::DateTime::<chrono::Local>::from(t).naive_local() > o.meta.saved_at)
-                                        .unwrap_or(false);
-                                    if newer {
-                                        ui.small("The file was saved after this copy was made.");
+                    for (i, o) in self.safety.offers.iter().enumerate() {
+                        ui.group(|ui| {
+                            ui.set_width(500.0);
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_width(370.0);
+                                    ui.strong(&o.meta.title);
+                                    let from = o.meta.original.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "never saved".into());
+                                    ui.small(from);
+                                    ui.small(format!("autosaved {}", o.meta.saved_at.format("%a %b %-d, %-I:%M %p")));
+                                    if let Some(orig) = &o.meta.original {
+                                        let newer = std::fs::metadata(orig)
+                                            .and_then(|m| m.modified())
+                                            .ok()
+                                            .map(|t| chrono::DateTime::<chrono::Local>::from(t).naive_local() > o.meta.saved_at)
+                                            .unwrap_or(false);
+                                        if newer {
+                                            ui.small("The file was saved after this copy was made.");
+                                        }
                                     }
-                                }
+                                });
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button("Delete").clicked() {
+                                        action = Some((i, false));
+                                    }
+                                    if ui.button(egui::RichText::new("Open").strong()).clicked() {
+                                        action = Some((i, true));
+                                    }
+                                });
                             });
-                            if ui.button("Open").clicked() {
-                                action = Some((i, true));
-                            }
-                            if ui.button("Delete").clicked() {
-                                action = Some((i, false));
-                            }
-                            ui.end_row();
-                        }
-                    });
+                        });
+                    }
                     ui.add_space(6.0);
                     if ui.button("Decide later").on_hover_text("Keep the copies; you'll be asked again next time").clicked() {
                         later = true;
