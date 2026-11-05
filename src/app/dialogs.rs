@@ -118,6 +118,9 @@ pub struct OptionsDlg {
     pub effort_driven: bool,
     pub auto_add: bool,
     pub currency: String,
+    /// Save ▸ AutoRecover every N minutes (0: off). A preference of this
+    /// computer, not of the plan.
+    pub autorecover: u32,
     pub error: Option<String>,
 }
 
@@ -329,6 +332,7 @@ impl Dialogs {
             effort_driven: s.new_tasks_effort_driven,
             auto_add: s.auto_add_resources,
             currency: s.currency_symbol.clone(),
+            autorecover: 5,
             error: None,
         });
     }
@@ -1424,6 +1428,12 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
             ui.label("Currency symbol:");
             ui.add(egui::TextEdit::singleline(&mut st.currency).desired_width(60.0).char_limit(4));
             ui.end_row();
+            ui.label("Save AutoRecover info every:");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut st.autorecover).range(0..=120).suffix(" min"));
+                ui.weak(if st.autorecover == 0 { "off" } else { "a copy of unsaved work, for after a crash" });
+            });
+            ui.end_row();
         });
         if let Some(e) = &st.error {
             ui.colored_label(pal().warn, e);
@@ -1446,6 +1456,10 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         app.dialogs.options = Some(st);
         return;
     };
+    if app.prefs.autorecover_minutes != st.autorecover {
+        app.prefs.autorecover_minutes = st.autorecover.min(120);
+        app.save_prefs();
+    }
     let s2 = st.clone();
     app.edit_project("Options", move |p| {
         let s = &mut p.settings;

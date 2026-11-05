@@ -261,11 +261,14 @@ pub struct History {
     undo: Vec<(String, Delta)>,
     redo: Vec<(String, Delta)>,
     pub limit: usize,
+    /// Bumped by every change the history sees (edits, undo, redo,
+    /// clear): AutoRecover saves when it moves.
+    generation: u64,
 }
 
 impl Default for History {
     fn default() -> Self {
-        History { undo: vec![], redo: vec![], limit: 100 }
+        History { undo: vec![], redo: vec![], limit: 100, generation: 0 }
     }
 }
 
@@ -283,7 +286,12 @@ impl History {
             self.undo.remove(0);
         }
         self.redo.clear();
+        self.generation += 1;
         true
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Drop the most recent checkpoint (used when an edit turns out to be a
@@ -296,6 +304,7 @@ impl History {
         let (label, d) = self.undo.pop()?;
         let inv = apply(current, d);
         self.redo.push((label.clone(), inv));
+        self.generation += 1;
         Some(label)
     }
 
@@ -303,6 +312,7 @@ impl History {
         let (label, d) = self.redo.pop()?;
         let inv = apply(current, d);
         self.undo.push((label.clone(), inv));
+        self.generation += 1;
         Some(label)
     }
 
@@ -321,6 +331,7 @@ impl History {
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.generation += 1;
     }
     /// Approximate memory held by the history (bytes).
     pub fn approx_bytes(&self) -> usize {

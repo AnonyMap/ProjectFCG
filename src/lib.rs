@@ -19,6 +19,7 @@ pub mod model;
 pub mod mspdi;
 pub mod ops;
 pub mod pdf;
+pub mod recovery;
 pub mod recurring;
 pub mod releases;
 pub mod resources;

@@ -18,6 +18,7 @@ pub mod print;
 pub mod release_dialogs;
 pub mod resource_dialogs;
 pub mod resource_sheet;
+pub mod safety;
 pub mod usage;
 pub mod ribbon;
 pub mod sample;
@@ -286,6 +287,8 @@ pub struct ProjectFcgApp {
     pub prefs: prefs::Prefs,
     /// Where prefs are saved (None in tests).
     pub prefs_path: Option<PathBuf>,
+    /// Crash safety: caught panics, AutoRecover, crash reports.
+    pub safety: safety::Safety,
 }
 
 impl Default for ProjectFcgApp {
@@ -361,6 +364,7 @@ impl ProjectFcgApp {
             usage: usage::UsageState::default(),
             prefs: prefs::Prefs::default(),
             prefs_path: None,
+            safety: Default::default(),
         };
         app.scroll_gantt_to(app.project.start);
         if let Some(t) = app.project.tasks.first() {
@@ -402,25 +406,49 @@ impl ProjectFcgApp {
     }
 
     /// Run an editing operation as one undoable step. On error the project
-    /// is restored and the message shown.
+    /// is restored and the message shown. An edit that panics (a bug) is
+    /// undone the same way and reported, rather than closing the window.
     pub fn edit_project<T>(
         &mut self,
         label: &str,
         f: impl FnOnce(&mut Project) -> Result<T, String>,
     ) -> Option<T> {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
         let before = self.project.clone();
-        match f(&mut self.project) {
-            Ok(v) => {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let v = f(&mut self.project);
+            if v.is_ok() {
+                // scheduling is part of the edit: if it fails, so does the edit
+                if self.auto_calc {
+                    schedule(&mut self.project);
+                } else {
+                    refresh_structure(&mut self.project);
+                }
+            }
+            v
+        }));
+        match r {
+            Ok(Ok(v)) => {
                 if self.history.checkpoint(label, &before, &self.project) {
                     self.dirty = true;
                 }
-                self.recalc();
+                self.needs_calc = !self.auto_calc;
                 self.set_status(label);
                 Some(v)
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 self.project = before;
                 self.error(e);
+                None
+            }
+            Err(payload) => {
+                self.project = before;
+                let report = self.report_panic(&format!("the edit “{label}”"), &*payload);
+                let msg = format!("“{label}” ran into an internal error and was undone; the plan is as it was.");
+                self.error(match &report {
+                    Some(p) => format!("{msg} A report was saved to {}.", p.display()),
+                    None => msg,
+                });
                 None
             }
         }
@@ -631,6 +659,10 @@ impl ProjectFcgApp {
         fresh.prefs_path = self.prefs_path.clone();
         fresh.board.show_charts = self.board.show_charts;
         fresh.board.backlog_open = self.board.backlog_open;
+        // the window's crash safety carries over; what it knew about the
+        // old plan doesn't
+        fresh.safety = std::mem::take(&mut self.safety);
+        fresh.safety.reset_for_new_plan();
         let start = fresh.project_span().0;
         fresh.scroll_gantt_to(start);
         *self = fresh;
@@ -791,21 +823,21 @@ impl ProjectFcgApp {
         match purpose {
             filebrowser::Mode::ExportCsv => {
                 let path = if path.extension().is_none() { path.with_extension("csv") } else { path };
-                match std::fs::write(&path, crate::io::to_csv(&self.project)) {
+                match crate::recovery::write_atomic(&path, crate::io::to_csv(&self.project).as_bytes()) {
                     Ok(()) => self.set_status(format!("Exported {}", path.display())),
                     Err(e) => self.error(format!("Couldn't export: {e}")),
                 }
             }
             filebrowser::Mode::ExportJiraCsv => {
                 let path = if path.extension().is_none() { path.with_extension("csv") } else { path };
-                match std::fs::write(&path, crate::jira::export_csv(&self.project)) {
+                match crate::recovery::write_atomic(&path, crate::jira::export_csv(&self.project).as_bytes()) {
                     Ok(()) => self.set_status(format!("Exported {} tickets to {}", self.project.tickets.len(), path.display())),
                     Err(e) => self.error(format!("Couldn't export: {e}")),
                 }
             }
             filebrowser::Mode::ExportXml => {
                 let path = if path.extension().is_none() { path.with_extension("xml") } else { path };
-                match std::fs::write(&path, crate::mspdi::to_xml(&self.project)) {
+                match crate::recovery::write_atomic(&path, crate::mspdi::to_xml(&self.project).as_bytes()) {
                     Ok(()) => self.set_status(format!("Saved {} as Project XML", path.display())),
                     Err(e) => self.error(format!("Couldn't save: {e}")),
                 }
@@ -813,7 +845,7 @@ impl ProjectFcgApp {
             filebrowser::Mode::ExportPdf => {
                 let path = if path.extension().is_none() { path.with_extension("pdf") } else { path };
                 let pdf = print::print_pdf(self, &self.print_options);
-                match std::fs::write(&path, pdf) {
+                match crate::recovery::write_atomic(&path, &pdf) {
                     Ok(()) => self.set_status(format!("Saved {}", path.display())),
                     Err(e) => self.error(format!("Couldn't save the PDF: {e}")),
                 }
@@ -821,7 +853,7 @@ impl ProjectFcgApp {
             filebrowser::Mode::ExportPng => {
                 let path = if path.extension().is_none() { path.with_extension("png") } else { path };
                 if let Picture::Ready(bytes) = std::mem::take(&mut self.picture) {
-                    match std::fs::write(&path, bytes) {
+                    match crate::recovery::write_atomic(&path, &bytes) {
                         Ok(()) => self.set_status(format!("Saved the picture as {}", path.display())),
                         Err(e) => self.error(format!("Couldn't save the picture: {e}")),
                     }
@@ -929,7 +961,12 @@ impl ProjectFcgApp {
             CustomFieldsDlg => self.dialogs.custom_fields = Some(view_dialogs::CustomFieldsDlg::new(&self.project)),
             SavePdf => self.pick_save(filebrowser::Mode::ExportPdf),
             ImportJiraCsv => self.pick_open_for(filebrowser::Mode::ImportJiraCsv),
-            Options => self.dialogs.open_options(&self.project),
+            Options => {
+                self.dialogs.open_options(&self.project);
+                if let Some(o) = &mut self.dialogs.options {
+                    o.autorecover = self.prefs.autorecover_minutes;
+                }
+            }
             Quit => self.guarded(PendingAction::Quit, ctx),
 
             Undo => {
@@ -2481,7 +2518,7 @@ impl ProjectFcgApp {
 
 impl eframe::App for ProjectFcgApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.frame(ui);
+        self.safe_frame(ui);
     }
 }
 
@@ -2513,6 +2550,9 @@ pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
                 }
                 None => ProjectFcgApp::default(),
             };
+            if let (Some(rec), Some(dir)) = (crate::recovery::Recovery::default_location(), crate::recovery::state_dir()) {
+                app.safety.enable(rec, dir);
+            }
             if let Some(path) = prefs::default_path() {
                 let loaded = prefs::load_with_migration(&path);
                 // apply the saved text size through the normal path so
@@ -2521,6 +2561,7 @@ pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
                 app.prefs.ui_zoom = loaded.ui_zoom;
                 app.prefs.theme_mode = loaded.theme_mode;
                 app.prefs.accent = loaded.accent;
+                app.prefs.autorecover_minutes = loaded.autorecover_minutes;
                 app.set_text_size(size);
                 app.prefs_path = Some(path);
             }
