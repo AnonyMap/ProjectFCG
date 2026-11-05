@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 fn frame(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), ..Default::default() };
-    let _ = ctx.run_ui(raw, |ui| app.frame(ui));
+    let mut out = ctx.run_ui(raw, |ui| app.frame(ui));
+    out.textures_delta.clear(); // epaint panics on dropped deltas in debug builds
 }
 
 fn big_plan() -> projectfcg::model::Project {

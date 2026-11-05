@@ -78,7 +78,8 @@ impl H {
         self.t += 0.05;
         let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0))), time: Some(self.t), events, ..Default::default() };
         let app = &mut self.app;
-        let _ = self.ctx.run_ui(raw, |ui| app.frame(ui));
+        let mut out = self.ctx.run_ui(raw, |ui| app.frame(ui));
+        out.textures_delta.clear(); // epaint panics on dropped deltas in debug builds
     }
     fn click(&mut self, at: Pos2, double: bool) {
         self.frame(vec![Event::PointerMoved(at)]);

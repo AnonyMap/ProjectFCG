@@ -544,6 +544,15 @@ pub fn schedule(p: &mut Project) {
     }
 }
 
+/// `schedule` without working out the start of a plan scheduled from its
+/// finish: leveling keeps the start where it was while it places tasks
+/// (its cheap reschedules can't move it), and works it out once at the end.
+pub(crate) fn schedule_fixed_start(p: &mut Project) {
+    p.apply_sprint_progress();
+    let prep = prepare(p);
+    run(p, &prep, true);
+}
+
 /// Leveling's cheap reschedule: dates only (forward pass, ALAP placement
 /// if needed, assignment dates). Slack, status, costs and overallocation
 /// are left as they were until the next full `schedule`.

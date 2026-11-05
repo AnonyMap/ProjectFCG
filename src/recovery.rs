@@ -45,14 +45,27 @@ pub fn state_dir() -> Option<PathBuf> {
 /// or the new one, never a truncated mix: write a temporary file beside
 /// it, flush it to disk, then rename it over the target.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    // through a symlink: replace the file it points at, not the link
+    let target = match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+        _ => path.to_path_buf(),
+    };
+    let path = target.as_path();
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
-    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    // unique per write: two threads saving the same file never share one
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{name}.{}-{n}.tmp", std::process::id()));
+    let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
     let result = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()?;
         drop(f);
+        if let Some(p) = perms {
+            let _ = std::fs::set_permissions(&tmp, p);
+        }
         std::fs::rename(&tmp, path)
     })();
     if result.is_err() {
@@ -101,13 +114,47 @@ impl Recovery {
         self.dir.join(format!("{session}.{ext}"))
     }
 
-    /// Save a recovery copy for a session (atomically).
-    pub fn write(&self, session: &str, json: &str, meta: &RecoveryMeta) -> std::io::Result<()> {
+    /// Save a recovery copy for a session (atomically). Copies are written
+    /// one at a time, and a copy of an older `generation` than one already
+    /// written for the session is skipped (the background writer and a
+    /// copy written after a panic can't overtake each other).
+    pub fn write(&self, session: &str, generation: u64, json: &str, meta: &RecoveryMeta) -> std::io::Result<()> {
+        static WRITTEN: std::sync::Mutex<Vec<(String, u64)>> = std::sync::Mutex::new(Vec::new());
+        let mut written = WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
+        match written.iter_mut().find(|(s, _)| s == session) {
+            Some((_, g)) if *g > generation => return Ok(()),
+            Some((_, g)) => *g = generation,
+            None => written.push((session.to_string(), generation)),
+        }
         std::fs::create_dir_all(&self.dir)?;
         write_atomic(&self.file(session, "pfcg"), json.as_bytes())?;
         let m = serde_json::to_string_pretty(meta).map_err(std::io::Error::other)?;
         write_atomic(&self.file(session, "meta.json"), m.as_bytes())?;
         self.touch(session)
+    }
+
+    /// Take over another session's copy (a recovered plan): its files
+    /// become this session's, so the work stays on disk until saved.
+    pub fn adopt(&self, from: &str, to: &str) -> std::io::Result<()> {
+        for ext in ["pfcg", "meta.json"] {
+            std::fs::rename(self.file(from, ext), self.file(to, ext))?;
+        }
+        let _ = std::fs::remove_file(self.file(from, "alive"));
+        self.touch(to)
+    }
+
+    /// Leftovers: heartbeats with no copy and temporary files, an hour old.
+    pub fn clean_up(&self, now: SystemTime) {
+        let Ok(rd) = std::fs::read_dir(&self.dir) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).is_some_and(|d| d > Duration::from_secs(3600));
+            let stray = name.ends_with(".tmp") || name.strip_suffix(".alive").is_some_and(|s| !self.file(s, "pfcg").exists());
+            if old && stray {
+                let _ = std::fs::remove_file(p);
+            }
+        }
     }
 
     /// Record that the session's window is still running.
@@ -137,7 +184,7 @@ impl Recovery {
             let gone = match alive {
                 Some(t) => now.duration_since(t).map(|d| d > STALE_AFTER).unwrap_or(false),
                 None => true,
-            };
+            } && !process_running(session);
             if !gone {
                 continue;
             }
@@ -162,25 +209,29 @@ impl Recovery {
     }
 }
 
+/// Is the window that owns `session` (whose id starts with its process id)
+/// still running? Checked on Linux, where a heartbeat can look stale just
+/// after the computer wakes from sleep; elsewhere the heartbeat decides.
+fn process_running(session: &str) -> bool {
+    let Some(pid) = session.split('-').next().and_then(|p| p.parse::<u32>().ok()) else { return false };
+    if pid == std::process::id() {
+        return false; // our own (tests); a new window's copies are never its own orphans
+    }
+    cfg!(target_os = "linux") && std::path::Path::new(&format!("/proc/{pid}")).exists() && std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.to_lowercase().contains("projectfcg") || c.trim().eq_ignore_ascii_case("apprun"))
+}
+
 /// A new session id: unique per window (process id and start time).
 pub fn new_session_id() -> String {
     let ms = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     format!("{}-{ms}", std::process::id())
 }
 
-/// Keep a session's heartbeat fresh from a background thread for as long
-/// as the process runs. A crash or kill stops it, which is the point.
-pub fn start_heartbeat(rec: Recovery, session: String) {
-    let _ = std::thread::Builder::new().name("autorecover-heartbeat".into()).spawn(move || loop {
-        let _ = rec.touch(&session);
-        std::thread::sleep(HEARTBEAT_EVERY);
-    });
-}
-
 // ---------------------------------------------------------------------------
 // Crash reports
 
-static LAST_PANIC: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The last panic and the thread it happened on (a background thread's
+/// panic must not end up in the window's report).
+static LAST_PANIC: std::sync::Mutex<Option<(std::thread::ThreadId, String)>> = std::sync::Mutex::new(None);
 
 /// Install a panic hook that remembers the message, where it happened and
 /// a backtrace, for the crash report, then prints as usual.
@@ -191,7 +242,7 @@ pub fn install_panic_hook() {
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
         let text = format!("{}\nthread: {thread}\n\nbacktrace:\n{bt}", describe_panic(info));
         if let Ok(mut slot) = LAST_PANIC.lock() {
-            *slot = Some(text);
+            *slot = Some((std::thread::current().id(), text));
         }
         previous(info);
     }));
@@ -219,7 +270,12 @@ pub fn payload_text(p: &(dyn std::any::Any + Send)) -> String {
 /// The last panic the hook saw (taken), or a description of `payload`
 /// when no hook is installed (tests).
 pub fn take_panic_text(payload: &(dyn std::any::Any + Send)) -> String {
-    LAST_PANIC.lock().ok().and_then(|mut s| s.take()).unwrap_or_else(|| format!("panic: {}", payload_text(payload)))
+    let me = std::thread::current().id();
+    LAST_PANIC
+        .lock()
+        .ok()
+        .and_then(|mut s| if s.as_ref().is_some_and(|(t, _)| *t == me) { s.take().map(|(_, text)| text) } else { None })
+        .unwrap_or_else(|| format!("panic: {}", payload_text(payload)))
 }
 
 /// Write a crash report into `<dir>/crash-reports/`. Returns its path.
@@ -275,7 +331,7 @@ mod tests {
         let d = tmpdir("orphans");
         let r = Recovery::new(d.clone());
         let meta = RecoveryMeta { original: None, title: "Plan".into(), saved_at: chrono::Local::now().naive_local(), app_version: "x".into() };
-        r.write("a", "{}", &meta).unwrap();
+        r.write("a", 1, "{}", &meta).unwrap();
         let now = SystemTime::now();
         assert!(r.orphans(now).is_empty(), "heartbeat is fresh");
         assert_eq!(r.orphans(now + Duration::from_secs(600)).len(), 1, "heartbeat stopped");

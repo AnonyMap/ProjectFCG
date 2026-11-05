@@ -36,7 +36,9 @@ pub const FIND_TESTS: [Test; 8] = [Test::Contains, Test::NotContains, Test::Equa
 fn row_matches(p: &Project, row: usize, needle: &str, o: &FindOpts, compiled: &Option<Compiled>) -> bool {
     match o.test {
         Test::Contains | Test::NotContains => {
-            let text = cell_text(p, row, o.field);
+            // Replace finds in the text it rewrites (dates as typed, not as
+            // shown), so what's found is what gets replaced
+            let text = if o.replace_mode { edit_text(p, row, o.field) } else { cell_text(p, row, o.field) };
             let has = if o.match_case { text.contains(needle) } else { text.to_lowercase().contains(&needle.to_lowercase()) };
             has == (o.test == Test::Contains)
         }
@@ -139,6 +141,20 @@ impl ProjectFcgApp {
         self.set_status(format!("\"{}\" not found", self.dialogs.find_text));
     }
 
+    /// Would `new` leave `row`'s field as it is? Dates compare by the date
+    /// they mean ("Tue 1/5/26" is still Mon 1/5/26).
+    fn unchanged(&self, row: usize, new: &str) -> bool {
+        let col = self.dialogs.find.field;
+        let old = edit_text(&self.project, row, col);
+        if col.edit_kind() == EditKind::Date {
+            let t = self.project.default_start_time();
+            if let (Ok(a), Ok(b)) = (crate::model::parse_date(&old, t), crate::model::parse_date(new, t)) {
+                return a == b;
+            }
+        }
+        old == new
+    }
+
     /// The text a replacement leaves in `row`'s field.
     fn replaced(&self, p: &Project, row: usize) -> String {
         let o = &self.dialogs.find;
@@ -171,7 +187,9 @@ impl ProjectFcgApp {
             let row = self.active_index().expect("matched");
             let new = self.replaced(&self.project, row);
             let col = self.dialogs.find.field;
-            if self.edit_project("Replace", move |p| set_cell(p, row, col, &new)).is_none() {
+            // nothing to change: don't touch the task (a date retyped as
+            // itself would gain a constraint)
+            if !self.unchanged(row, &new) && self.edit_project("Replace", move |p| set_cell(p, row, col, &new)).is_none() {
                 return;
             }
         }
@@ -190,7 +208,11 @@ impl ProjectFcgApp {
             self.set_status(format!("\"{}\" not found", self.dialogs.find_text));
             return 0;
         }
-        let texts: Vec<(usize, String)> = rows.iter().map(|&r| (r, self.replaced(&self.project, r))).collect();
+        let texts: Vec<(usize, String)> = rows.iter().map(|&r| (r, self.replaced(&self.project, r))).filter(|(r, t)| !self.unchanged(*r, t)).collect();
+        if texts.is_empty() {
+            self.set_status("Nothing to replace: the replacement leaves every match as it is");
+            return 0;
+        }
         let col = o.field;
         let n = texts.len();
         let done = self.edit_project("Replace All", move |p| {

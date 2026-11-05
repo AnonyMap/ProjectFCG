@@ -70,6 +70,7 @@ impl ProjectFcgApp {
                 }
                 let Some(s) = t.calc.start else { continue };
                 let cal = p.duration_calendar(r).into_owned();
+                // a start moves to the start of a working day…
                 let shift = |d: chrono::NaiveDateTime| {
                     if mins >= 0 {
                         cal.next_working_start(cal.add_work(d, mins))
@@ -77,15 +78,27 @@ impl ProjectFcgApp {
                         cal.sub_work(d, -mins)
                     }
                 };
+                // …a finish to the end of one
+                let shift_finish = |d: chrono::NaiveDateTime| {
+                    if mins >= 0 {
+                        cal.add_work(d, mins)
+                    } else {
+                        cal.prev_working_end(cal.sub_work(d, -mins))
+                    }
+                };
                 let ns = shift(s);
+                let from_finish = p.finish_date.is_some();
                 let t = &mut p.tasks[r];
                 match t.mode {
                     TaskMode::Manual => t.manual_start = Some(ns),
                     TaskMode::Auto => match (t.constraint, t.constraint_date) {
-                        (ConstraintType::ASAP | ConstraintType::ALAP | ConstraintType::SNET, _) | (_, None) => {
-                            t.constraint = ConstraintType::SNET;
+                        // scheduled from the finish, tasks sit as late as
+                        // they can: moving one earlier needs No Later Than
+                        (ConstraintType::ASAP | ConstraintType::ALAP | ConstraintType::SNET | ConstraintType::SNLT, _) | (_, None) => {
+                            t.constraint = if from_finish && mins < 0 { ConstraintType::SNLT } else { ConstraintType::SNET };
                             t.constraint_date = Some(ns);
                         }
+                        (ConstraintType::FNET | ConstraintType::FNLT | ConstraintType::MFO, Some(cd)) => t.constraint_date = Some(shift_finish(cd)),
                         (_, Some(cd)) => t.constraint_date = Some(shift(cd)),
                     },
                 }

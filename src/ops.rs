@@ -395,11 +395,14 @@ impl Project {
     pub fn set_start(&mut self, row: usize, dt: NaiveDateTime) -> OpResult {
         let dt = crate::calendar::clamp_datetime(dt);
         let summary = self.is_summary(row);
+        // in a plan scheduled from its finish, a typed date is a latest
+        // date (Project sets Start No Later Than)
+        let kind = if self.finish_date.is_some() { ConstraintType::SNLT } else { ConstraintType::SNET };
         let t = &mut self.tasks[row];
         match t.mode {
             TaskMode::Manual if !summary => t.manual_start = Some(dt),
             _ => {
-                t.constraint = ConstraintType::SNET;
+                t.constraint = kind;
                 t.constraint_date = Some(dt);
             }
         }
@@ -415,6 +418,7 @@ impl Project {
         }
         let cal = self.duration_calendar(row).into_owned();
         let start = self.tasks[row].calc.start;
+        let from_finish = self.finish_date.is_some();
         let t = &mut self.tasks[row];
         match t.mode {
             TaskMode::Manual => {
@@ -429,7 +433,7 @@ impl Project {
                 return self.set_duration(row, d);
             }
             TaskMode::Auto => {
-                t.constraint = ConstraintType::FNET;
+                t.constraint = if from_finish { ConstraintType::FNLT } else { ConstraintType::FNET };
                 t.constraint_date = Some(dt);
             }
         }

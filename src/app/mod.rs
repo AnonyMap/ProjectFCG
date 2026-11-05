@@ -224,6 +224,8 @@ pub enum PendingAction {
     NewAgileSample,
     Open,
     OpenPath(PathBuf),
+    /// A recovery copy offered at start (index into the offers).
+    OpenRecovered(usize),
     Quit,
 }
 
@@ -767,6 +769,7 @@ impl ProjectFcgApp {
             }
             PendingAction::Open => self.pick_open(),
             PendingAction::OpenPath(p) => self.open_path(p),
+            PendingAction::OpenRecovered(i) => self.open_recovered_now(i),
             PendingAction::Quit => {
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1860,7 +1863,9 @@ impl ProjectFcgApp {
     }
 
     fn fill_down(&mut self) {
-        let rows = self.selected_rows_sorted();
+        // from the top row as shown (a sorted view isn't in ID order)
+        let sel: std::collections::HashSet<usize> = self.selected_rows_sorted().into_iter().collect();
+        let rows: Vec<usize> = self.display_rows().into_iter().filter_map(|r| if let DisplayRow::Task(i) = r { Some(i) } else { None }).filter(|i| sel.contains(i)).collect();
         let Some(col) = self.columns.get(self.active_col).map(|c| c.id) else {
             return;
         };

@@ -384,7 +384,7 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool, ctl: 
     let mut delayed: HashSet<u32> = HashSet::new();
 
     for pass in 0..6 {
-        schedule(p);
+        crate::schedule::schedule_fixed_start(p);
         // structure, links and spans don't change while leveling, only delays
         let prep = crate::schedule::prepare(p);
         let n = p.tasks.len();
@@ -461,7 +461,7 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool, ctl: 
             let needs_fresh = !lazy && dirty && (always_fresh || p.settings.level_within_slack || moved[t] || rolled[t] || reads_stale);
             if needs_fresh {
                 if always_fresh || p.settings.level_within_slack {
-                    schedule(p); // slack is needed (and the reference recomputes everything)
+                    crate::schedule::schedule_fixed_start(p); // slack is needed (and the reference recomputes everything)
                 } else {
                     crate::schedule::reschedule_dates(p, &prep);
                 }

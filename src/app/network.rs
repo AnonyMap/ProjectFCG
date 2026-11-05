@@ -240,7 +240,9 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
     // ---- links ----
     let lay = &app.network.layout;
     let (crit_fill, crit_line) = critical_colors();
-    for &(a, b, crit) in &lay.links {
+    for &(a, b, _) in &lay.links {
+        // from the latest calculation (F9 recalculates without an edit)
+        let crit = app.project.tasks.get(a).is_some_and(|t| t.calc.critical) && app.project.tasks.get(b).is_some_and(|t| t.calc.critical);
         let (Some(pa), Some(pb)) = (lay.pos.get(&a), lay.pos.get(&b)) else { continue };
         let s = to_screen(pos2(pa.x + BOX_W, pa.y + BOX_H / 2.0));
         let e = to_screen(pos2(pb.x, pb.y + BOX_H / 2.0));

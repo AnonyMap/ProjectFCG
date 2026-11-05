@@ -17,7 +17,8 @@ fn plan() -> Project {
 
 fn frame(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), ..Default::default() };
-    let _ = ctx.run_ui(raw, |ui| app.safe_frame(ui));
+    let mut out = ctx.run_ui(raw, |ui| app.safe_frame(ui));
+    out.textures_delta.clear(); // epaint panics on dropped deltas in debug builds
 }
 
 fn tmp(tag: &str) -> std::path::PathBuf {
@@ -146,7 +147,7 @@ fn autorecover_copies_unsaved_work_and_offers_it_after_a_crash() {
     let mut next = ProjectFcgApp::new(plan());
     next.safety.recovery = Some(rec.clone());
     next.safety.offers = orphans;
-    next.open_recovered(0);
+    next.open_recovered(0, &egui::Context::default());
     assert_eq!(next.project.tasks[1].name, "Lost?");
     assert!(next.dirty && next.path.is_none(), "saving it never overwrites without asking");
     assert!(!copy.exists() && rec.orphans(later).is_empty());

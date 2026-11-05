@@ -29,7 +29,8 @@ use std::time::{Duration, Instant};
 pub const GIVE_UP_AFTER: u32 = 4;
 
 enum Job {
-    Write(Box<Project>, RecoveryMeta),
+    /// The plan, what it is, and the history generation it was at.
+    Write(Box<Project>, RecoveryMeta, u64),
     Remove,
 }
 
@@ -38,6 +39,8 @@ enum Job {
 struct Writer {
     tx: mpsc::Sender<Job>,
     closed: Arc<AtomicBool>,
+    /// A copy couldn't be written (disk full…): try again later.
+    failed: Arc<AtomicBool>,
 }
 
 impl Writer {
@@ -45,16 +48,19 @@ impl Writer {
         let (tx, rx) = mpsc::channel::<Job>();
         let closed = Arc::new(AtomicBool::new(false));
         let c2 = closed.clone();
+        let failed = Arc::new(AtomicBool::new(false));
+        let f2 = failed.clone();
         std::thread::Builder::new()
             .name("autorecover".into())
             .spawn(move || loop {
                 match rx.recv_timeout(recovery::HEARTBEAT_EVERY) {
-                    Ok(Job::Write(p, meta)) => {
+                    Ok(Job::Write(p, meta, generation)) => {
                         if c2.load(Ordering::SeqCst) {
                             continue;
                         }
-                        if let Ok(json) = crate::io::to_json(&p) {
-                            let _ = rec.write(&session, &json, &meta);
+                        let ok = crate::io::to_json(&p).ok().is_some_and(|json| rec.write(&session, generation, &json, &meta).is_ok());
+                        if !ok {
+                            f2.store(true, Ordering::SeqCst);
                         }
                         // closed while writing: don't leave it behind
                         if c2.load(Ordering::SeqCst) {
@@ -71,7 +77,7 @@ impl Writer {
                 }
             })
             .ok()?;
-        Some(Writer { tx, closed })
+        Some(Writer { tx, closed, failed })
     }
 }
 
@@ -97,8 +103,12 @@ pub struct Safety {
     changed_at: Option<Instant>,
     /// A copy is on disk (removed again once the plan is saved).
     has_copy: bool,
-    /// The last plan that drew without a panic, and its generation.
+    /// The last plan that drew without a panic, and its generation. A plan
+    /// becomes "good" only once a frame has drawn it after it changed: an
+    /// edit made by a dialog lands after the frame's drawing, so the frame
+    /// that made it hasn't drawn it yet.
     last_good: Option<(u64, Box<Project>)>,
+    candidate: Option<(u64, Box<Project>)>,
     pub consecutive_panics: u32,
     pub notice: Option<CrashNotice>,
     /// Recovery copies from windows that didn't close normally.
@@ -117,12 +127,14 @@ impl Safety {
         self.saved_gen = None;
         self.changed_at = None;
         self.last_good = None;
+        self.candidate = None;
         self.consecutive_panics = 0;
     }
 
     /// Turn on AutoRecover and crash reports for a real window.
     pub fn enable(&mut self, recovery: Recovery, state_dir: PathBuf) {
         self.session = recovery::new_session_id();
+        recovery.clean_up(std::time::SystemTime::now());
         self.offers = recovery.orphans(std::time::SystemTime::now());
         self.writer = Writer::start(recovery.clone(), self.session.clone());
         self.recovery = Some(recovery);
@@ -145,8 +157,14 @@ impl ProjectFcgApp {
             Ok(()) => {
                 self.safety.consecutive_panics = 0;
                 let g = self.history.generation();
-                if self.safety.last_good.as_ref().is_none_or(|(lg, _)| *lg != g) {
-                    self.safety.last_good = Some((g, Box::new(self.project.clone())));
+                let s = &mut self.safety;
+                if s.last_good.as_ref().is_none_or(|(lg, _)| *lg != g) {
+                    // drawn twice at this generation: good
+                    if s.candidate.as_ref().is_some_and(|(cg, _)| *cg == g) {
+                        s.last_good = s.candidate.take();
+                    } else {
+                        s.candidate = Some((g, Box::new(self.project.clone())));
+                    }
                 }
             }
             Err(payload) => self.after_frame_panic(payload, &ctx),
@@ -240,10 +258,11 @@ impl ProjectFcgApp {
             return false;
         }
         let meta = self.recovery_meta();
+        let g = self.history.generation();
         let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::io::to_json(&self.project)))
             .ok()
             .and_then(|r| r.ok())
-            .is_some_and(|json| rec.write(&self.safety.session, &json, &meta).is_ok());
+            .is_some_and(|json| rec.write(&self.safety.session, g, &json, &meta).is_ok());
         if ok {
             self.safety.has_copy = true;
             self.safety.saved_gen = Some(self.history.generation());
@@ -258,6 +277,11 @@ impl ProjectFcgApp {
     pub fn autorecover_tick(&mut self, ctx: &egui::Context) {
         let Some(writer) = &self.safety.writer else { return };
         let g = self.history.generation();
+        if writer.failed.swap(false, Ordering::SeqCst) {
+            // the last copy didn't make it to disk: write again when due
+            self.safety.saved_gen = None;
+            self.safety.has_copy = false;
+        }
         if !self.dirty {
             if self.safety.has_copy {
                 let _ = writer.tx.send(Job::Remove);
@@ -275,7 +299,7 @@ impl ProjectFcgApp {
         let since = *self.safety.changed_at.get_or_insert_with(Instant::now);
         let waited = since.elapsed();
         if waited >= interval {
-            let job = Job::Write(Box::new(self.project.clone()), self.recovery_meta());
+            let job = Job::Write(Box::new(self.project.clone()), self.recovery_meta(), g);
             if writer.tx.send(job).is_ok() {
                 self.safety.has_copy = true;
                 self.safety.saved_gen = Some(g);
@@ -299,8 +323,15 @@ impl ProjectFcgApp {
     }
 
     /// Open a recovery copy offered at start. It opens as a new, unsaved
-    /// plan, so saving it never overwrites a file without asking.
-    pub fn open_recovered(&mut self, i: usize) {
+    /// plan, so saving it never overwrites a file without asking; unsaved
+    /// work already open is asked about first.
+    pub fn open_recovered(&mut self, i: usize, ctx: &egui::Context) {
+        if i < self.safety.offers.len() {
+            self.guarded(super::PendingAction::OpenRecovered(i), ctx);
+        }
+    }
+
+    pub(crate) fn open_recovered_now(&mut self, i: usize) {
         if i >= self.safety.offers.len() {
             return;
         }
@@ -310,7 +341,15 @@ impl ProjectFcgApp {
             Ok(p) => {
                 self.replace_project(p, None);
                 self.dirty = true;
-                rec.remove(&o.session);
+                // the copy becomes this window's own, so the work stays on
+                // disk until it's saved (this window could fail too)
+                let adopted = !self.safety.session.is_empty() && rec.adopt(&o.session, &self.safety.session).is_ok();
+                if adopted {
+                    self.safety.has_copy = true;
+                    self.safety.saved_gen = Some(self.history.generation());
+                } else {
+                    rec.remove(&o.session);
+                }
                 self.set_status(format!("Recovered “{}” (autosaved {}). Save it to keep it.", o.meta.title, o.meta.saved_at.format("%b %-d, %-I:%M %p")));
             }
             Err(e) => self.error(format!("Couldn't open the recovery copy: {e}")),
@@ -413,7 +452,7 @@ impl ProjectFcgApp {
                     }
                 });
             match action {
-                Some((i, true)) => self.open_recovered(i),
+                Some((i, true)) => self.open_recovered(i, ctx),
                 Some((i, false)) => self.discard_recovered(i),
                 None if later => self.safety.offers.clear(),
                 None => {}
