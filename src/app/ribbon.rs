@@ -305,6 +305,39 @@ fn task_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
                 if small(ui, "✖", "Unlink", "Unlink tasks (Ctrl+Shift+F2)", has) {
                     app.execute(Command::UnlinkTasks, &ctx);
                 }
+                let wk = app.days_per_week();
+                ui.add_enabled_ui(has, |ui| {
+                    ui.menu_button(RichText::new("⇆ Move").size(12.0), |ui| {
+                        for (label, d) in [("Forward 1 Day", 1), ("Forward 1 Week", wk), ("Forward 4 Weeks", 4 * wk)] {
+                            if ui.button(label).clicked() {
+                                app.execute(Command::MoveTasks(d), &ctx);
+                                ui.close();
+                            }
+                        }
+                        ui.separator();
+                        for (label, d) in [("Back 1 Day", -1), ("Back 1 Week", -wk), ("Back 4 Weeks", -4 * wk)] {
+                            if ui.button(label).clicked() {
+                                app.execute(Command::MoveTasks(d), &ctx);
+                                ui.close();
+                            }
+                        }
+                        if ui.button("Custom…").clicked() {
+                            app.execute(Command::MoveTasksDlg, &ctx);
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("When Resources Are Available").on_hover_text("Level the selected tasks").clicked() {
+                            app.execute(Command::LevelSelection, &ctx);
+                            ui.close();
+                        }
+                        if ui.button("Incomplete Parts to Status Date").clicked() {
+                            app.move_incomplete_to_status_date();
+                            ui.close();
+                        }
+                    })
+                    .response
+                    .on_hover_text("Move the selected tasks forward or back");
+                });
             });
         });
     });
@@ -385,6 +418,9 @@ fn task_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             if small(ui, "🔍", "Find", "Find (Ctrl+F)", true) {
                 app.execute(Command::Find, &ctx);
+            }
+            if small(ui, "🔁", "Replace", "Replace (Ctrl+H)", true) {
+                app.execute(Command::ReplaceDlg, &ctx);
             }
             if small(ui, "👉", "Go To", "Go to task ID or date (F5)", true) {
                 app.execute(Command::GoTo, &ctx);
@@ -728,6 +764,26 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
     });
     group(ui, "Data", |ui| {
         ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Sort:").size(12.0));
+                let label = app.view.sort.label(&app.project);
+                egui::ComboBox::from_id_salt("sort_by")
+                    .selected_text(label)
+                    .width(110.0)
+                    .show_ui(ui, |ui| {
+                        for s in super::sort::SortPreset::ALL {
+                            if ui.selectable_label(app.view.sort == s.spec(), s.label()).clicked() {
+                                app.execute(Command::SortBy(s), &ctx);
+                            }
+                        }
+                        ui.separator();
+                        if ui.selectable_label(false, "Sort By…").clicked() {
+                            app.execute(Command::SortDlg, &ctx);
+                        }
+                    })
+                    .response
+                    .on_hover_text("Show the tasks in another order (IDs don't change unless you renumber)");
+            });
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Table:").size(12.0));
                 egui::ComboBox::from_id_salt("table_preset")

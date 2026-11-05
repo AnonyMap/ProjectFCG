@@ -38,6 +38,7 @@ impl Project {
         let mut t = Task::new(uid, name, mode, &self.settings.durations);
         t.task_type = self.settings.default_task_type;
         t.effort_driven = self.settings.new_tasks_effort_driven;
+        t.ev_method = self.settings.default_ev_method;
         t
     }
 

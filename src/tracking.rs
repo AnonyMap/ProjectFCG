@@ -399,7 +399,11 @@ pub(crate) fn compute_tracking(p: &mut Project, acost: &[f64], parents: &[Option
                 }
             };
             bcws[i] = b.cost * share;
-            bcwp[i] = b.cost * t.percent_complete / 100.0;
+            let done = match t.ev_method {
+                crate::model::EvMethod::PercentComplete => t.percent_complete,
+                crate::model::EvMethod::PhysicalPercentComplete => t.physical_percent,
+            };
+            bcwp[i] = b.cost * done.clamp(0.0, 100.0) / 100.0;
         }
     }
     // summaries' own fixed cost accrues with their rolled-up progress (and

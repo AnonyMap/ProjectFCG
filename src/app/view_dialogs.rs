@@ -176,7 +176,7 @@ pub fn show_all(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     custom_group(app, ctx);
 }
 
-fn field_combo(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, col: &mut ColumnId, width: f32, p: &Project) {
+pub(crate) fn field_combo(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, col: &mut ColumnId, width: f32, p: &Project) {
     egui::ComboBox::from_id_salt(id).selected_text(col.title_in(p)).width(width).height(360.0).show_ui(ui, |ui| {
         let in_use = p.custom_fields_in_use();
         for c in ColumnId::filterable() {

@@ -295,8 +295,35 @@ pub struct Task {
     /// Custom field values ("Text1" → value); unset fields aren't stored.
     #[serde(default)]
     pub custom: std::collections::BTreeMap<String, crate::custom_fields::CustomValue>,
+    /// Physical % Complete: progress judged by the work done, not the time
+    /// spent (used for earned value when `ev_method` says so).
+    #[serde(default)]
+    pub physical_percent: f64,
+    /// Task Information ▸ Advanced ▸ Earned value method.
+    #[serde(default)]
+    pub ev_method: EvMethod,
     #[serde(skip)]
     pub calc: Computed,
+}
+
+/// How a task's earned value (BCWP) is measured.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EvMethod {
+    /// Baseline cost × % Complete.
+    #[default]
+    PercentComplete,
+    /// Baseline cost × Physical % Complete.
+    PhysicalPercentComplete,
+}
+
+impl EvMethod {
+    pub const ALL: [EvMethod; 2] = [EvMethod::PercentComplete, EvMethod::PhysicalPercentComplete];
+    pub fn label(self) -> &'static str {
+        match self {
+            EvMethod::PercentComplete => "% Complete",
+            EvMethod::PhysicalPercentComplete => "Physical % Complete",
+        }
+    }
 }
 
 fn default_priority() -> u32 {
@@ -505,6 +532,8 @@ impl Task {
             calendar: None,
             ignore_resource_calendars: false,
             custom: Default::default(),
+            physical_percent: 0.0,
+            ev_method: EvMethod::PercentComplete,
             calc: Computed::default(),
         }
     }
@@ -553,6 +582,8 @@ pub struct Settings {
     pub currency_symbol: String,
     pub leveling_order: LevelingOrder,
     pub level_within_slack: bool,
+    /// Options ▸ Advanced ▸ Default task earned value method.
+    pub default_ev_method: EvMethod,
 }
 
 impl Default for Settings {
@@ -572,6 +603,7 @@ impl Default for Settings {
             currency_symbol: "$".into(),
             leveling_order: LevelingOrder::Standard,
             level_within_slack: false,
+            default_ev_method: EvMethod::PercentComplete,
         }
     }
 }

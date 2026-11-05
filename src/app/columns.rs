@@ -76,6 +76,9 @@ pub enum ColumnId {
     Tcpi,
     /// The task's calendar (empty: the project calendar).
     TaskCalendar,
+    /// Physical % Complete, and whether earned value uses it.
+    PhysicalPercentComplete,
+    EarnedValueMethod,
     /// Text1–10, Number1–10, Flag1–10, Date1–10, Cost1–10.
     Custom(crate::custom_fields::CustomField),
     /// Baseline 1–10 start / finish.
@@ -117,6 +120,8 @@ impl ColumnId {
         ColumnId::Milestone,
         ColumnId::Notes,
         ColumnId::TaskCalendar,
+        ColumnId::PhysicalPercentComplete,
+        ColumnId::EarnedValueMethod,
         ColumnId::StartSlack,
         ColumnId::FinishSlack,
         ColumnId::BaselineStart,
@@ -237,11 +242,11 @@ impl ColumnId {
             Indicators | Mode | Name | Notes | Wbs | UniqueId | Milestone | Status => "General",
             Duration | Start | Finish | Predecessors | Successors | ConstraintType | ConstraintDate | Deadline | EarlyStart | EarlyFinish | LateStart | LateFinish | TaskCalendar => "Schedule",
             TotalSlack | FreeSlack | StartSlack | FinishSlack | Critical => "Slack & Critical",
-            PercentComplete | ActualStart | ActualFinish | ActualDuration | RemainingDuration | ActualWork | RemainingWork | PercentWorkComplete => "Tracking",
+            PercentComplete | PhysicalPercentComplete | ActualStart | ActualFinish | ActualDuration | RemainingDuration | ActualWork | RemainingWork | PercentWorkComplete => "Tracking",
             BaselineStart | BaselineFinish | BaselineDuration | BaselineWork | BaselineCost | StartVariance | FinishVariance | DurationVariance => "Baseline & Variance",
             BaselineNStart(_) | BaselineNFinish(_) => "Baselines 1–10",
             Cost | FixedCost | ActualCost | RemainingCost => "Cost",
-            Bcws | Bcwp | Acwp | Sv | Cv | Spi | Cpi | Bac | Eac | Vac | Tcpi => "Earned Value",
+            Bcws | Bcwp | Acwp | Sv | Cv | Spi | Cpi | Bac | Eac | Vac | Tcpi | EarnedValueMethod => "Earned Value",
             ResourceNames | ResourceInitials | Work | TaskType | EffortDriven | Overallocated => "Resources",
             Priority | LevelingDelay => "Leveling",
             Custom(_) => "Custom Fields",
@@ -346,6 +351,8 @@ impl ColumnId {
             ColumnId::Milestone => "Milestone",
             ColumnId::Notes => "Notes",
             ColumnId::TaskCalendar => "Task Calendar",
+            ColumnId::PhysicalPercentComplete => "Physical % Complete",
+            ColumnId::EarnedValueMethod => "Earned Value Method",
             ColumnId::Custom(_) => "",
             ColumnId::StartSlack => "Start Slack",
             ColumnId::FinishSlack => "Finish Slack",
@@ -386,6 +393,7 @@ impl ColumnId {
         match self {
             ColumnId::Duration
             | ColumnId::PercentComplete
+            | ColumnId::PhysicalPercentComplete
             | ColumnId::TotalSlack
             | ColumnId::FreeSlack
             | ColumnId::StartSlack
@@ -431,6 +439,7 @@ impl ColumnId {
             | ColumnId::Duration
             | ColumnId::Predecessors
             | ColumnId::PercentComplete
+            | ColumnId::PhysicalPercentComplete
             | ColumnId::ResourceNames
             | ColumnId::Work
             | ColumnId::FixedCost
@@ -452,6 +461,7 @@ impl ColumnId {
             | ColumnId::ConstraintType
             | ColumnId::Milestone
             | ColumnId::TaskType
+            | ColumnId::EarnedValueMethod
             | ColumnId::EffortDriven => EditKind::Choice,
             _ => EditKind::ReadOnly,
         }
@@ -464,6 +474,7 @@ impl ColumnId {
             ColumnId::Milestone | ColumnId::EffortDriven => vec!["Yes", "No"],
             ColumnId::Custom(f) if f.kind == FieldKind::Flag => vec!["Yes", "No"],
             ColumnId::TaskType => crate::model::TaskType::ALL.iter().map(|t| t.label()).collect(),
+            ColumnId::EarnedValueMethod => crate::model::EvMethod::ALL.iter().map(|t| t.label()).collect(),
             _ => vec![],
         }
     }
@@ -511,6 +522,8 @@ pub fn cell_text(p: &Project, row: usize, col: ColumnId) -> String {
             v.join(",")
         }
         ColumnId::PercentComplete => format!("{}%", fmt_num(c.percent_complete.round())),
+        ColumnId::PhysicalPercentComplete => format!("{}%", fmt_num(t.physical_percent.round())),
+        ColumnId::EarnedValueMethod => t.ev_method.label().into(),
         ColumnId::TotalSlack => dur_days(p, c.total_slack),
         ColumnId::FreeSlack => dur_days(p, c.free_slack),
         ColumnId::EarlyStart => opt_date(c.early_start),
@@ -628,6 +641,7 @@ pub fn edit_text(p: &Project, row: usize, col: ColumnId) -> String {
         ColumnId::ActualStart => t.actual_start.map(fmt_datetime).unwrap_or_default(),
         ColumnId::ActualFinish => t.actual_finish.map(fmt_datetime).unwrap_or_default(),
         ColumnId::PercentComplete => fmt_num(t.percent_complete),
+        ColumnId::PhysicalPercentComplete => fmt_num(t.physical_percent),
         ColumnId::Notes => t.notes.clone(),
         ColumnId::TaskCalendar => t.calendar.and_then(|u| p.base_calendar(u)).map(|c| c.name.clone()).unwrap_or_default(),
         ColumnId::Custom(f) => match (p.custom_value(row, f), f.kind) {
@@ -751,6 +765,24 @@ pub fn set_cell(p: &mut Project, row: usize, col: ColumnId, text: &str) -> Resul
                 .ok_or_else(|| format!("\"{txt}\" is not a task type"))?;
             Ok(())
         }
+        ColumnId::PhysicalPercentComplete => {
+            if p.is_summary(row) {
+                return Err("A summary's progress comes from its subtasks.".into());
+            }
+            let v = crate::duration::parse_number(txt.trim_end_matches('%').trim()).ok_or_else(|| format!("\"{txt}\" isn't a percentage."))?;
+            if !(0.0..=100.0).contains(&v) {
+                return Err("Physical % Complete is between 0% and 100%.".into());
+            }
+            p.tasks[row].physical_percent = v;
+            Ok(())
+        }
+        ColumnId::EarnedValueMethod => {
+            p.tasks[row].ev_method = crate::model::EvMethod::ALL
+                .into_iter()
+                .find(|m| m.label().eq_ignore_ascii_case(txt) || (txt.to_ascii_lowercase().starts_with("phys") && *m == crate::model::EvMethod::PhysicalPercentComplete))
+                .ok_or_else(|| format!("\"{txt}\" isn't an earned value method (% Complete or Physical % Complete)."))?;
+            Ok(())
+        }
         ColumnId::EffortDriven => {
             p.tasks[row].effort_driven = matches!(txt.to_ascii_lowercase().as_str(), "yes" | "y" | "true" | "1");
             Ok(())
@@ -835,6 +867,10 @@ pub fn reset_cell(p: &mut Project, row: usize, col: ColumnId) -> Result<(), Stri
         ColumnId::TaskCalendar => p.set_task_calendar(row, None, false),
         ColumnId::Custom(f) => p.set_custom(row, f, ""),
         ColumnId::PercentComplete => p.set_field_text(row, Field::PercentComplete, "0"),
+        ColumnId::PhysicalPercentComplete => {
+            p.tasks[row].physical_percent = 0.0;
+            Ok(())
+        }
         ColumnId::Duration => p.set_field_text(row, Field::Duration, "1d?"),
         _ => Ok(()),
     }
@@ -893,7 +929,7 @@ impl Table {
         match self {
             Table::Entry => ColumnId::default_set().into_iter().map(|c| c.0).collect(),
             Table::Schedule => vec![Indicators, Name, Start, Finish, LateStart, LateFinish, FreeSlack, TotalSlack],
-            Table::Tracking => vec![Indicators, Name, ActualStart, ActualFinish, PercentComplete, PercentWorkComplete, ActualDuration, RemainingDuration, ActualCost, ActualWork],
+            Table::Tracking => vec![Indicators, Name, ActualStart, ActualFinish, PercentComplete, PhysicalPercentComplete, PercentWorkComplete, ActualDuration, RemainingDuration, ActualCost, ActualWork],
             Table::Cost => vec![Indicators, Name, FixedCost, Cost, BaselineCost, ActualCost, RemainingCost],
             Table::Work => vec![Indicators, Name, Work, BaselineWork, ActualWork, RemainingWork, PercentWorkComplete],
             Table::EarnedValue => vec![Indicators, Name, Bcws, Bcwp, Acwp, Sv, Cv, Spi, Cpi, Bac, Eac, Vac],

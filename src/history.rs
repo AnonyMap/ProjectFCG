@@ -81,6 +81,8 @@ pub fn same_task(a: &Task, b: &Task) -> bool {
         calendar,
         ignore_resource_calendars,
         custom,
+        physical_percent,
+        ev_method,
         calc: _,
     } = a;
     *uid == b.uid
@@ -116,6 +118,8 @@ pub fn same_task(a: &Task, b: &Task) -> bool {
         && *calendar == b.calendar
         && *ignore_resource_calendars == b.ignore_resource_calendars
         && *custom == b.custom
+        && physical_percent.to_bits() == b.physical_percent.to_bits()
+        && *ev_method == b.ev_method
 }
 
 /// Same for everything in a project that isn't a task (or computed).

@@ -70,6 +70,8 @@ pub struct TaskInfo {
     /// Task calendar (base calendar uid) and its resource-calendar switch.
     pub calendar: Option<u32>,
     pub ignore_resource_calendars: bool,
+    pub ev_method: crate::model::EvMethod,
+    pub physical_percent: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -121,6 +123,7 @@ pub struct OptionsDlg {
     /// Save ▸ AutoRecover every N minutes (0: off). A preference of this
     /// computer, not of the plan.
     pub autorecover: u32,
+    pub ev_method: crate::model::EvMethod,
     pub error: Option<String>,
 }
 
@@ -146,6 +149,9 @@ pub struct Dialogs {
     pub goto_date: String,
     pub find_open: bool,
     pub find_text: String,
+    pub find: super::find::FindOpts,
+    pub sort: Option<super::sort::SortDlg>,
+    pub move_tasks: Option<super::move_tasks::MoveDlg>,
     pub shortcuts_open: bool,
     pub about_open: bool,
     pub bar_styles: Option<super::format_dialogs::BarStylesDlg>,
@@ -209,6 +215,8 @@ impl Dialogs {
             || self.filter_def.is_some()
             || self.custom_group.is_some()
             || self.release.is_some()
+            || self.sort.is_some()
+            || self.move_tasks.is_some()
             || self.release_version.is_some()
             || self.print.is_some()
             || self.custom_fields.is_some()
@@ -269,6 +277,8 @@ impl Dialogs {
             board_progress: p.progress_from_board(row),
             calendar: t.calendar,
             ignore_resource_calendars: t.ignore_resource_calendars,
+            ev_method: t.ev_method,
+            physical_percent: t.physical_percent,
             assigns: p
                 .assignments_of_task(row)
                 .into_iter()
@@ -333,6 +343,7 @@ impl Dialogs {
             auto_add: s.auto_add_resources,
             currency: s.currency_symbol.clone(),
             autorecover: 5,
+            ev_method: s.default_ev_method,
             error: None,
         });
     }
@@ -509,7 +520,9 @@ pub fn show_all(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     options(app, ctx);
     dependency(app, ctx);
     goto(app, ctx);
-    find(app, ctx);
+    super::find::dialog(app, ctx);
+    super::sort::dialog(app, ctx);
+    super::move_tasks::dialog(app, ctx);
     shortcuts(app, ctx);
     about(app, ctx);
     save_prompt(app, ctx);
@@ -728,6 +741,19 @@ fn task_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                     ui.label("WBS code:");
                     ui.label(&st.wbs);
                     ui.end_row();
+                    ui.label("Earned value method:");
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt("ti_ev").selected_text(st.ev_method.label()).show_ui(ui, |ui| {
+                            for m in crate::model::EvMethod::ALL {
+                                ui.selectable_value(&mut st.ev_method, m, m.label());
+                            }
+                        });
+                        ui.add_enabled_ui(!st.summary, |ui| {
+                            ui.label("Physical % complete:");
+                            ui.add(egui::DragValue::new(&mut st.physical_percent).range(0.0..=100.0).suffix("%").speed(1.0));
+                        });
+                    });
+                    ui.end_row();
                     ui.label("Task type:");
                     egui::ComboBox::from_id_salt("ti_tt").selected_text(st.task_type.label()).show_ui(ui, |ui| {
                         for t in crate::model::TaskType::ALL {
@@ -829,6 +855,10 @@ fn task_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         p.tasks[row].task_type = st.task_type;
         p.tasks[row].effort_driven = st.effort_driven;
         p.tasks[row].priority = st.priority.min(1000);
+        p.tasks[row].ev_method = st.ev_method;
+        if !st.summary {
+            p.tasks[row].physical_percent = st.physical_percent.clamp(0.0, 100.0);
+        }
         if st.calendar != p.tasks[row].calendar || st.ignore_resource_calendars != p.tasks[row].ignore_resource_calendars {
             p.set_task_calendar(row, st.calendar, st.ignore_resource_calendars)?;
         }
@@ -1428,6 +1458,13 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
             ui.label("Currency symbol:");
             ui.add(egui::TextEdit::singleline(&mut st.currency).desired_width(60.0).char_limit(4));
             ui.end_row();
+            ui.label("Default earned value method:");
+            egui::ComboBox::from_id_salt("opt_ev").selected_text(st.ev_method.label()).show_ui(ui, |ui| {
+                for m in crate::model::EvMethod::ALL {
+                    ui.selectable_value(&mut st.ev_method, m, m.label());
+                }
+            });
+            ui.end_row();
             ui.label("Save AutoRecover info every:");
             ui.horizontal(|ui| {
                 ui.add(egui::DragValue::new(&mut st.autorecover).range(0..=120).suffix(" min"));
@@ -1476,6 +1513,7 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         s.new_tasks_effort_driven = s2.effort_driven;
         s.auto_add_resources = s2.auto_add;
         s.currency_symbol = s2.currency.trim().to_string();
+        s.default_ev_method = s2.ev_method;
         Ok(())
     });
 }
@@ -1600,40 +1638,6 @@ fn goto(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         if let Ok(d) = parse_date(&date, chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap()) {
             app.scroll_gantt_to(d);
         }
-    }
-}
-
-fn find(app: &mut ProjectFcgApp, ctx: &egui::Context) {
-    if !app.dialogs.find_open {
-        return;
-    }
-    let mut text = std::mem::take(&mut app.dialogs.find_text);
-    let (mut next, mut close) = (false, false);
-    let keys = modal(ctx, "find", "Find", 380.0, |ui| {
-        ui.horizontal(|ui| {
-            ui.label("Find what:");
-            let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(220.0));
-            r.request_focus();
-        });
-        ui.label(RichText::new("Look in field: Task Name    Test: contains").size(11.0).color(pal().text_dim));
-        ui.separator();
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Close").clicked() {
-                close = true;
-            }
-            if ui.button(RichText::new("Find Next").strong()).clicked() {
-                next = true;
-            }
-        });
-    });
-    app.dialogs.find_text = text;
-    next = next || keys.enter;
-    if close || keys.esc {
-        app.dialogs.find_open = false;
-        return;
-    }
-    if next {
-        app.find_next();
     }
 }
 

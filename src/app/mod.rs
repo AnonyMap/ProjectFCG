@@ -8,11 +8,13 @@ pub mod datepicker;
 pub mod dialogs;
 pub mod filebrowser;
 pub mod filters;
+pub mod find;
 pub mod format_dialogs;
 pub mod gantt;
 pub mod inspector;
 pub mod interchange;
 pub mod jobs;
+pub mod move_tasks;
 pub mod sprint_dialogs;
 pub mod prefs;
 pub mod print;
@@ -23,6 +25,7 @@ pub mod safety;
 pub mod usage;
 pub mod ribbon;
 pub mod sample;
+pub mod sort;
 pub mod system_theme;
 pub mod table;
 pub mod theme;
@@ -131,6 +134,8 @@ pub struct ViewOptions {
     pub related_summaries: bool,
     /// Group By headers the user collapsed (by label).
     pub collapsed_groups: std::collections::HashSet<String>,
+    /// View ▸ Sort (rows shown in this order; IDs unchanged).
+    pub sort: sort::SortSpec,
 }
 
 impl Default for ViewOptions {
@@ -149,6 +154,7 @@ impl Default for ViewOptions {
             main: MainView::Gantt,
             related_summaries: false,
             collapsed_groups: Default::default(),
+            sort: Default::default(),
         }
     }
 }
@@ -544,7 +550,9 @@ impl ProjectFcgApp {
                     e += 1;
                 }
                 let label = filters::group_label(p, keyed[k].1, self.group, &cx);
-                let rows: Vec<usize> = keyed[k..e].iter().map(|x| x.1).collect();
+                let mut rows: Vec<usize> = keyed[k..e].iter().map(|x| x.1).collect();
+                // grouped rows have no outline: sort them flat
+                sort::sort_rows(p, &mut rows, &sort::SortSpec { keep_outline: false, ..self.view.sort.clone() });
                 let collapsed = self.view.collapsed_groups.contains(&label);
                 out.push(DisplayRow::Group(groups.len()));
                 groups.push(filters::rollup(p, label, &rows, collapsed));
@@ -581,9 +589,13 @@ impl ProjectFcgApp {
                 }
                 stack.push(i);
             }
-            out.extend(base.into_iter().filter(|&i| keep[i]).map(DisplayRow::Task));
+            let mut rows: Vec<usize> = base.into_iter().filter(|&i| keep[i]).collect();
+            sort::sort_rows(p, &mut rows, &self.view.sort);
+            out.extend(rows.into_iter().map(DisplayRow::Task));
         } else {
-            out.extend(base.into_iter().filter(|&i| eval.matches(i)).map(DisplayRow::Task));
+            let mut rows: Vec<usize> = base.into_iter().filter(|&i| eval.matches(i)).collect();
+            sort::sort_rows(p, &mut rows, &self.view.sort);
+            out.extend(rows.into_iter().map(DisplayRow::Task));
         }
         out
     }
@@ -1036,7 +1048,21 @@ impl ProjectFcgApp {
                     self.row_selected = true;
                 }
             }
-            Find => self.dialogs.find_open = true,
+            Find => {
+                self.dialogs.find.replace_mode = false;
+                self.dialogs.find_open = true;
+            }
+            ReplaceDlg => {
+                self.dialogs.find.replace_mode = true;
+                self.dialogs.find_open = true;
+            }
+            SortBy(pre) => {
+                self.view.sort = pre.spec();
+                self.set_status(format!("Sorted {}", pre.label()));
+            }
+            SortDlg => self.dialogs.sort = Some(sort::SortDlg::from(&self.view.sort)),
+            MoveTasks(days) => self.move_tasks(days),
+            MoveTasksDlg => self.dialogs.move_tasks = Some(Default::default()),
             FindNext => self.find_next(),
             GoTo => self.dialogs.goto_open = true,
 
@@ -1836,29 +1862,6 @@ impl ProjectFcgApp {
             }
             Ok(())
         });
-    }
-
-    pub fn find_next(&mut self) {
-        let needle = self.dialogs.find_text.to_lowercase();
-        if needle.is_empty() {
-            self.dialogs.find_open = true;
-            return;
-        }
-        let n = self.project.tasks.len();
-        let start = self.active_index().map(|i| i + 1).unwrap_or(0);
-        for k in 0..n {
-            let i = (start + k) % n;
-            if self.project.tasks[i].name.to_lowercase().contains(&needle) {
-                // reveal collapsed ancestors
-                for a in self.project.ancestors_of(i) {
-                    self.project.tasks[a].collapsed = false;
-                }
-                self.select_index(i);
-                self.set_status(format!("Found \"{}\" at task {}", self.dialogs.find_text, i + 1));
-                return;
-            }
-        }
-        self.set_status(format!("\"{}\" not found", self.dialogs.find_text));
     }
 
     // ------------------------------------------------------------ editing

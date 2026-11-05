@@ -116,6 +116,8 @@ pub fn field_value(p: &Project, row: usize, col: ColumnId) -> Value {
         C::Critical => Value::Bool(c.critical),
         C::Milestone => Value::Bool(t.is_milestone()),
         C::EffortDriven => Value::Bool(t.effort_driven),
+        C::PhysicalPercentComplete => Value::Num(t.physical_percent),
+        C::EarnedValueMethod => Value::Text(t.ev_method.label().into()),
         C::Overallocated => Value::Bool(c.overallocated),
         C::Custom(f) => {
             use crate::custom_fields::{CustomValue as V, FieldKind as K};
