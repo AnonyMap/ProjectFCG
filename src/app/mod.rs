@@ -1,6 +1,7 @@
 //! The desktop application (egui/eframe).
 
 pub mod bars;
+pub mod calendar_view;
 pub mod board;
 pub mod columns;
 pub mod commands;
@@ -15,6 +16,7 @@ pub mod inspector;
 pub mod interchange;
 pub mod jobs;
 pub mod move_tasks;
+pub mod network;
 pub mod sprint_dialogs;
 pub mod prefs;
 pub mod print;
@@ -179,6 +181,8 @@ pub enum MainView {
     ResourceSheet,
     ResourceUsage,
     Board,
+    NetworkDiagram,
+    Calendar,
 }
 
 impl MainView {
@@ -189,6 +193,8 @@ impl MainView {
             MainView::ResourceSheet => "Resource Sheet",
             MainView::ResourceUsage => "Resource Usage",
             MainView::Board => "Board",
+            MainView::NetworkDiagram => "Network Diagram",
+            MainView::Calendar => "Calendar",
         }
     }
 }
@@ -298,6 +304,8 @@ pub struct ProjectFcgApp {
     pub safety: safety::Safety,
     /// Leveling running in the background (large plans).
     pub leveling_job: Option<jobs::LevelJob>,
+    pub network: network::NetworkState,
+    pub calendar: calendar_view::CalendarState,
 }
 
 impl Default for ProjectFcgApp {
@@ -375,6 +383,8 @@ impl ProjectFcgApp {
             prefs_path: None,
             safety: Default::default(),
             leveling_job: None,
+            network: Default::default(),
+            calendar: Default::default(),
         };
         app.scroll_gantt_to(app.project.start);
         if let Some(t) = app.project.tasks.first() {
@@ -1253,6 +1263,8 @@ impl ProjectFcgApp {
                 });
             }
 
+            ZoomIn if self.view.main == MainView::NetworkDiagram => self.network.zoom = (self.network.zoom * 1.25).min(2.5),
+            ZoomOut if self.view.main == MainView::NetworkDiagram => self.network.zoom = (self.network.zoom / 1.25).max(0.25),
             ZoomIn => self.zoom_to(self.gantt.ppd * 1.5, 0.5),
             ZoomOut => self.zoom_to(self.gantt.ppd / 1.5, 0.5),
             SetTimescale(t) => self.zoom_to(t.ppd(), 0.0),
@@ -2205,6 +2217,8 @@ impl ProjectFcgApp {
             MainView::ResourceUsage => return usage::show(self, ui, full, usage::UsageKind::Resource),
             MainView::TaskUsage => return usage::show(self, ui, full, usage::UsageKind::Task),
             MainView::Board => return board::show(self, ui, full),
+            MainView::NetworkDiagram => return network::show(self, ui, full),
+            MainView::Calendar => return calendar_view::show(self, ui, full),
             MainView::Gantt => {}
         }
         let min_table = 120.0;
@@ -2306,7 +2320,7 @@ impl ProjectFcgApp {
                             }
                         }
                         MainView::Board => board::key(self, *key, *modifiers),
-                        MainView::Gantt => {}
+                        MainView::Gantt | MainView::NetworkDiagram | MainView::Calendar => {}
                     }
                 }
                 egui::Event::Text(t) => {
