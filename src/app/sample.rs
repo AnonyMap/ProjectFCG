@@ -130,8 +130,140 @@ pub fn software_release() -> Project {
         p.set_field_text(*row, Field::ResourceNames, names).expect("sample assignment");
     }
     p.tasks[16].fixed_cost = 500.0;
+    sample_risks(&mut p);
     schedule(&mut p);
     p
+}
+
+/// A small DoD-style register for the sample: risks tied to tasks, a
+/// resource and the whole project, an opportunity and an issue.
+fn sample_risks(p: &mut Project) {
+    use crate::risks::{Dimension::*, Rating, Risk, RiskKind, RiskLink, RiskStandard, RiskStatus, RiskStep};
+    let d = |m, dd| NaiveDate::from_ymd_opt(2026, m, dd);
+    let task = |p: &Project, name: &str| RiskLink::Task(p.tasks.iter().find(|t| t.name == name).expect("sample task").uid);
+    let rate = |l: u8, c: &[(crate::risks::Dimension, u8)]| {
+        let mut r = Rating { likelihood: l, consequence: vec![] };
+        for &(dim, v) in c {
+            r.set(dim, v);
+        }
+        r
+    };
+    p.risk_settings.standard = RiskStandard::Dod;
+    let lena = p.resource_by_name("Lena Park").map(|i| RiskLink::Resource(p.resources[i].uid));
+    let risks = vec![
+        Risk {
+            title: "Migration corrupts legacy records".into(),
+            category: "Technical".into(),
+            event: "the legacy customer tables hold records that break the new schema's constraints".into(),
+            consequence: "the database migration fails in production, delaying the release by up to two weeks".into(),
+            cause: "years of unvalidated writes from the old admin tool".into(),
+            links: vec![task(p, "Database migration")],
+            owner: "Marco Ruiz".into(),
+            status: RiskStatus::Handling,
+            identified: d(11, 2),
+            due: d(12, 4),
+            rating: rate(4, &[(Cost, 2), (Schedule, 4), (Performance, 3)]),
+            target: rate(1, &[(Schedule, 2)]),
+            response: "Control".into(),
+            response_plan: "Profile the legacy data, clean it, and rehearse the migration on a copy of production.".into(),
+            steps: vec![
+                RiskStep { activity: "Profile legacy data".into(), date: d(11, 13), done: true, after: rate(3, &[(Schedule, 4)]) },
+                RiskStep { activity: "Clean-up scripts reviewed".into(), date: d(11, 24), done: false, after: rate(2, &[(Schedule, 3)]) },
+                RiskStep { activity: "Rehearsal on prod copy".into(), date: d(12, 4), done: false, after: rate(1, &[(Schedule, 2)]) },
+            ],
+            cost_impact: 18_000.0,
+            schedule_days: 10.0,
+            ..Default::default()
+        },
+        Risk {
+            title: "Load test misses peak traffic".into(),
+            category: "Technical".into(),
+            event: "performance testing uses last year's traffic profile".into(),
+            consequence: "the API slows under launch-day load and needs emergency scaling".into(),
+            links: vec![task(p, "Performance testing"), task(p, "Backend API")],
+            owner: "Sam Okafor".into(),
+            identified: d(11, 2),
+            due: d(12, 11),
+            rating: rate(3, &[(Cost, 2), (Performance, 4)]),
+            target: rate(2, &[(Performance, 2)]),
+            response: "Control".into(),
+            response_plan: "Model launch traffic from marketing's forecast and test at twice that.".into(),
+            cost_impact: 6_000.0,
+            ..Default::default()
+        },
+        Risk {
+            title: "Key engineer unavailable".into(),
+            category: "Programmatic".into(),
+            event: "Lena is pulled onto the support rotation during development".into(),
+            consequence: "Frontend UI slips about a week".into(),
+            links: lena.into_iter().chain([task(p, "Frontend UI")]).collect(),
+            owner: "Priya Shah".into(),
+            status: RiskStatus::Watch,
+            identified: d(11, 2),
+            rating: rate(2, &[(Schedule, 3)]),
+            response: "Accept".into(),
+            response_plan: "Watch the rotation schedule; swap with Marco if needed.".into(),
+            schedule_days: 5.0,
+            ..Default::default()
+        },
+        Risk {
+            title: "App store review delays".into(),
+            category: "Programmatic".into(),
+            event: "the store review flags the new payment screens".into(),
+            consequence: "the release sits in review past the announced date".into(),
+            links: vec![task(p, "Production deployment")],
+            owner: "Ops Team".into(),
+            identified: d(11, 9),
+            rating: rate(2, &[(Schedule, 4)]),
+            target: rate(1, &[(Schedule, 4)]),
+            response: "Avoid".into(),
+            response_plan: "Submit a pre-review build with the payment screens two weeks early.".into(),
+            ..Default::default()
+        },
+        Risk {
+            title: "Vendor contract renewal".into(),
+            category: "Business".into(),
+            event: "the hosting vendor raises prices at the January renewal".into(),
+            consequence: "hosting costs rise 20% for the year".into(),
+            owner: "Project Manager".into(),
+            identified: d(11, 2),
+            rating: rate(3, &[(Cost, 2)]),
+            response: "Transfer".into(),
+            response_plan: "Lock a two-year rate with the renewal.".into(),
+            cost_impact: 4_000.0,
+            ..Default::default()
+        },
+        Risk {
+            kind: RiskKind::Opportunity,
+            title: "Reuse the design system".into(),
+            category: "Technical".into(),
+            event: "the mobile team's design system is ready before Frontend UI starts".into(),
+            consequence: "Frontend UI finishes about four days sooner".into(),
+            links: vec![task(p, "Frontend UI")],
+            owner: "Lena Park".into(),
+            identified: d(11, 5),
+            rating: rate(3, &[(Schedule, 3)]),
+            response: "Pursue now".into(),
+            schedule_days: 4.0,
+            ..Default::default()
+        },
+        Risk {
+            kind: RiskKind::Issue,
+            title: "Requirements sign-off late".into(),
+            event: "product sign-off on the requirements slipped three days".into(),
+            consequence: "Architecture review starts late and the planning milestone moves".into(),
+            links: vec![task(p, "Define requirements")],
+            owner: "Priya Shah".into(),
+            identified: d(11, 6),
+            rating: rate(0, &[(Schedule, 3)]),
+            response: "Control".into(),
+            response_plan: "Overlap the architecture review with the last day of sign-off.".into(),
+            ..Default::default()
+        },
+    ];
+    for r in risks {
+        p.add_risk(r);
+    }
 }
 
 #[cfg(test)]

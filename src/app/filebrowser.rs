@@ -10,6 +10,7 @@ pub enum Mode {
     Open,
     SaveAs,
     ExportCsv,
+    ExportRisksCsv,
     ImportJiraCsv,
     ExportJiraCsv,
     ExportXml,
@@ -70,7 +71,7 @@ impl FileBrowser {
 
     fn ext(&self) -> &'static str {
         match self.mode {
-            Mode::ExportCsv | Mode::ImportJiraCsv | Mode::ExportJiraCsv => "csv",
+            Mode::ExportCsv | Mode::ExportRisksCsv | Mode::ImportJiraCsv | Mode::ExportJiraCsv => "csv",
             Mode::ExportXml => "xml",
             Mode::ExportPng => "png",
             Mode::ExportPdf => "pdf",
@@ -108,6 +109,7 @@ impl FileBrowser {
             Mode::Open => "Open",
             Mode::SaveAs => "Save As",
             Mode::ExportCsv => "Export as CSV",
+            Mode::ExportRisksCsv => "Export Risk Register",
             Mode::ImportJiraCsv => "Import Jira CSV",
             Mode::ExportJiraCsv => "Export Board as Jira CSV",
             Mode::ExportXml => "Save as Project XML",

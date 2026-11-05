@@ -145,6 +145,8 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         calendars,
         custom_aliases,
         finish_date,
+        risks,
+        risk_settings,
         calc: _,
     } = a;
     *title == b.title
@@ -164,6 +166,8 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         && *calendars == b.calendars
         && *custom_aliases == b.custom_aliases
         && *finish_date == b.finish_date
+        && *risks == b.risks
+        && *risk_settings == b.risk_settings
 }
 
 fn rest_of(p: &Project) -> Box<Project> {
@@ -188,6 +192,8 @@ fn rest_of(p: &Project) -> Box<Project> {
         calendars: p.calendars.clone(),
         custom_aliases: p.custom_aliases.clone(),
         finish_date: p.finish_date,
+        risks: p.risks.clone(),
+        risk_settings: p.risk_settings.clone(),
         calc: Default::default(),
     })
 }

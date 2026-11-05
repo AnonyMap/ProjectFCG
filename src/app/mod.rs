@@ -23,6 +23,7 @@ pub mod print;
 pub mod release_dialogs;
 pub mod resource_dialogs;
 pub mod resource_sheet;
+pub mod risk_view;
 pub mod safety;
 pub mod usage;
 pub mod ribbon;
@@ -183,6 +184,7 @@ pub enum MainView {
     Board,
     NetworkDiagram,
     Calendar,
+    Risks,
 }
 
 impl MainView {
@@ -195,6 +197,7 @@ impl MainView {
             MainView::Board => "Board",
             MainView::NetworkDiagram => "Network Diagram",
             MainView::Calendar => "Calendar",
+            MainView::Risks => "Risk Register",
         }
     }
 }
@@ -308,6 +311,7 @@ pub struct ProjectFcgApp {
     pub leveling_job: Option<jobs::LevelJob>,
     pub network: network::NetworkState,
     pub calendar: calendar_view::CalendarState,
+    pub risk_view: risk_view::RiskViewState,
 }
 
 impl Default for ProjectFcgApp {
@@ -387,6 +391,7 @@ impl ProjectFcgApp {
             leveling_job: None,
             network: Default::default(),
             calendar: Default::default(),
+            risk_view: Default::default(),
         };
         app.scroll_gantt_to(app.project.start);
         if let Some(t) = app.project.tasks.first() {
@@ -816,6 +821,7 @@ impl ProjectFcgApp {
         let (ext, filter_name, default_name) = match purpose {
             filebrowser::Mode::ExportCsv => ("csv", "CSV", format!("{}.csv", self.project.title)),
             filebrowser::Mode::ExportJiraCsv => ("csv", "CSV", format!("{} - Jira.csv", self.project.title)),
+            filebrowser::Mode::ExportRisksCsv => ("csv", "CSV", format!("{} - Risks.csv", self.project.title)),
             filebrowser::Mode::ExportXml => ("xml", "MS Project XML", format!("{}.xml", self.project.title)),
             filebrowser::Mode::ExportPdf => ("pdf", "PDF", format!("{}.pdf", self.project.title)),
             filebrowser::Mode::ExportPng => ("png", "PNG image", format!("{} - {}.png", self.project.title, self.view.main.label())),
@@ -858,6 +864,13 @@ impl ProjectFcgApp {
                 let path = if path.extension().is_none() { path.with_extension("csv") } else { path };
                 match crate::recovery::write_atomic(&path, crate::io::to_csv(&self.project).as_bytes()) {
                     Ok(()) => self.set_status(format!("Exported {}", path.display())),
+                    Err(e) => self.error(format!("Couldn't export: {e}")),
+                }
+            }
+            filebrowser::Mode::ExportRisksCsv => {
+                let path = if path.extension().is_none() { path.with_extension("csv") } else { path };
+                match crate::recovery::write_atomic(&path, self.project.risks_csv().as_bytes()) {
+                    Ok(()) => self.set_status(format!("Exported {} risk(s) to {}", self.project.risks.len(), path.display())),
                     Err(e) => self.error(format!("Couldn't export: {e}")),
                 }
             }
@@ -953,6 +966,20 @@ impl ProjectFcgApp {
                 TaskInfo => return self.execute(ResourceInfo, ctx),
                 EditCell => return self.res_begin_edit(None),
                 Copy | Cut | Paste | Indent | Outdent | MoveUp | MoveDown | LinkTasks | UnlinkTasks | FillDown | ResetField => return,
+                _ => {}
+            }
+        }
+        // In the Risk Register, edits in the details are saved before any
+        // command (so Undo undoes them), and row commands act on risks.
+        if self.view.main == MainView::Risks {
+            self.commit_risk_draft();
+            match cmd {
+                InsertTask => {
+                    self.new_risk(crate::risks::RiskKind::Threat, vec![]);
+                    return;
+                }
+                DeleteTasks | DeleteKey => return self.delete_selected_risk(),
+                Copy | Cut | Paste | Indent | Outdent | MoveUp | MoveDown | LinkTasks | UnlinkTasks | FillDown | ResetField | InsertSummary | InsertMilestone | InsertRecurring | EditCell | TaskInfo | Find | FindNext => return,
                 _ => {}
             }
         }
@@ -1573,6 +1600,7 @@ impl ProjectFcgApp {
             }
             ShowView(v) => {
                 self.commit_edit();
+                self.commit_risk_draft();
                 self.res_commit_edit();
                 self.view.main = v;
                 if v == MainView::ResourceSheet && self.sheet.active.is_none() {
@@ -2224,6 +2252,7 @@ impl ProjectFcgApp {
             MainView::Board => return board::show(self, ui, full),
             MainView::NetworkDiagram => return network::show(self, ui, full),
             MainView::Calendar => return calendar_view::show(self, ui, full),
+            MainView::Risks => return risk_view::show(self, ui, full),
             MainView::Gantt => {}
         }
         let min_table = 120.0;
@@ -2328,7 +2357,7 @@ impl ProjectFcgApp {
                             }
                         }
                         MainView::Board => board::key(self, *key, *modifiers),
-                        MainView::Gantt | MainView::NetworkDiagram | MainView::Calendar => {}
+                        MainView::Gantt | MainView::NetworkDiagram | MainView::Calendar | MainView::Risks => {}
                     }
                 }
                 egui::Event::Text(t) => {

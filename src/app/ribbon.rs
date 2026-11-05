@@ -752,6 +752,7 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         for (v, glyph, cap, tip) in [
             (MainView::NetworkDiagram, "🕸", "Network\nDiagram", "Tasks as boxes linked in the order the work happens; critical in red"),
             (MainView::Calendar, "📅", "Calendar", "The tasks on a month calendar"),
+            (MainView::Risks, "⚠", "Risk\nRegister", "Risks, opportunities and issues: ratings, handling and the risk matrix (none, DoD or PMI)"),
             (MainView::Board, "📋", "Board", "Kanban board: sprints, tickets, backlog, burndown"),
             (MainView::TaskUsage, "📆", "Task\nUsage", "Work per period for each task and its resources"),
             (MainView::ResourceSheet, "👥", "Resource\nSheet", "List of resources: rates, max units, calendars"),

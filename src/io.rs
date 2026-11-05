@@ -52,6 +52,7 @@ pub fn from_json(text: &str) -> Result<Project, String> {
     // a hand-edited or damaged file: values into range, unique IDs
     p.sanitize();
     p.repair_board();
+    p.repair_risks();
     p.repair_calendars();
     p.repair_custom_fields();
     p.views.repair();

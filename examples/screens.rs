@@ -205,6 +205,16 @@ fn network(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.select_single(projectfcg::app::RowRef::Task(app.project.tasks[r].uid));
 }
 
+/// Risk Register: the sample's DoD register, the migration risk open
+/// with its burn-down, targets on the matrix.
+fn risks(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.tab = RibbonTab::View;
+    app.execute(Command::ShowView(MainView::Risks), ctx);
+    app.risk_view.show_target = true;
+    let id = app.project.risks.first().map(|r| r.id);
+    app.select_risk(id);
+}
+
 /// Calendar: the month the build work happens in, a task selected.
 fn calendar(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.tab = RibbonTab::View;
@@ -240,6 +250,7 @@ const SCENES: &[Scene] = &[
     Scene { name: "network", agile: false, setup: network },
     Scene { name: "calendar-view", agile: false, setup: calendar },
     Scene { name: "sort", agile: false, setup: sort },
+    Scene { name: "risks", agile: false, setup: risks },
 ];
 
 struct Shot {

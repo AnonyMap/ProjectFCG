@@ -13,8 +13,9 @@ recurring and inactive tasks** (0.7), and **Group By and custom filters,
 releases tied to the schedule, cumulative flow, slippage bars and Copy
 Picture** (0.8), and **printing to PDF, task calendars, custom fields and
 updates through Gear Lever** (0.9), and **crash safety with AutoRecover, the
-Network Diagram and Calendar views, Sort, Find and Replace, Move Task and
-scheduling from the finish date** (0.10).
+Network Diagram and Calendar views, Sort, Find and Replace, Move Task,
+scheduling from the finish date and a risk register with DoD and PMI rating
+and a risk matrix** (0.10).
 
 *FCG* = Fast, Cheap, Good: pick two.
 
@@ -337,7 +338,7 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 * Intersecting calendars wrote long exceptions out day by day and stopped after ten years, so a task could be scheduled during a resource's 14-year absence, and scheduling 5,000 tasks with task calendars took 14× longer. Exceptions now intersect as date ranges.
 * Number custom fields were rounded to 2 places by Fill Down and in Project XML (0.001 was lost). Clicking a bar then pressing Delete cleared a field instead of deleting the task. Printing a date range drew labels of bars outside it over the table. A pasted task could keep a deleted calendar and silently join the next one created. The filter dialog's field list rescanned every task 50 times a frame. A stray build file was committed.
 
-### New in 0.10: stability, Network Diagram, Calendar, sort, find and replace, schedule from finish
+### New in 0.10: stability, Network Diagram, Calendar, sort, find and replace, schedule from finish, risk register
 
 **Stability**
 
@@ -366,6 +367,21 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 * **Physical % Complete** and **Earned Value Method** (per task, with a project default in Options): earned value can measure work done rather than time spent. They're in the Tracking table and in Project XML.
 
 ![Sort By over the sample, sorted by Finish Date](docs/sort.png)
+
+**Risk register** (View ▸ Risk Register)
+
+Project itself has no risk register (teams keep one in a spreadsheet or in Project Online), so this one follows the two guides PMs are usually asked to report against, or neither:
+
+* **Risks, opportunities and issues** in one register, each tied to **tasks, resources, releases, or the whole project**. Right-click a task ▸ *Add Risk for Task* starts one. Tasks with open risks show a ⚠ in the Indicators column, coloured by the worst level, and its tooltip lists them.
+* **The standard is per register, and a risk can follow its own:**
+  * **None**: a free description, likelihood and impact 1–5, Low/Medium/High by L × I, an optional probability in %.
+  * **DoD** ([Risk, Issue, and Opportunity Management Guide, 2023](https://www.dau.edu/sites/default/files/2023-10/DoD%20RIO%20Guide%20Sep%202023.pdf)): an *If … then …* statement with a root cause; likelihood 1–5 (Not Likely >1–20% … Near Certainty >80–99%); consequence rated separately for **cost, schedule and performance**, with the guide's criteria as tooltips, where the worst counts. Handling is Accept / Avoid / Transfer / Control, or Pursue now / Defer / Reevaluate / Reject for opportunities. Issues have no likelihood and are rated on consequence alone. A **burn-down** charts the planned rating after each handling step against its date.
+  * **PMI** (PMBOK / Practice Standard for Project Risk Management): a cause → risk → effect statement; probability 0.1–0.9 and impact 0.05–0.80 (cost, schedule, scope, quality), with **P × I scores** (High ≥ 0.18, Moderate ≥ 0.05). Responses are Escalate / Avoid / Transfer / Mitigate / Accept, or Escalate / Exploit / Share / Enhance / Accept for opportunities. It adds triggers, contingency and fallback plans, secondary risks, urgency and the residual rating.
+* **Owner, status** (Open, Handling, Watch, Realized, Closed), dates, category, **cost and schedule impact, and EMV** (probability × cost).
+* **The 5×5 risk matrix** is coloured by the register's standard, with every open risk's ID in its cell. A second, blue matrix shows opportunities, and a strip shows issues by consequence. Click a cell to filter the register to it. *Show targets* draws an arrow from each risk to where its handling should take it. Right-click a cell to recolour it (*Reset* goes back to the standard).
+* **Sort and filter** by level, status, type or search, and **Export CSV** for a report. Every edit is one undo step, and the register is saved in the `.pfcg` file.
+
+![The Risk Register: the sample's DoD register, the 5×5 risk and opportunity matrices with target arrows, and a risk's If/then statement](docs/risks.png)
 
 **Crashes found by fuzzing** (all fixed and pinned by `tests/fuzz_repros.rs`; `tests/fuzz_stability.rs` keeps fuzzing on every test run)
 
@@ -457,6 +473,9 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 69. **Move Task and Sort follow Project.** Moving an auto-scheduled task sets *Start No Earlier Than* rather than changing the task's dependencies, so the move is visible and undoable in Task Information. A view sort leaves IDs alone, so links and "Task 12" still mean the same thing; only *Permanently renumber* changes them. A date constraint other than SNET keeps its type and moves its date: a finish constraint moves to the end of a working day. In a plan scheduled from its finish date, where tasks already sit as late as they can, moving a task earlier sets *Start No Later Than*, and typing a start or finish sets *Start/Finish No Later Than* (Project's rule).
 70. **Schedule from finish: the start is worked out, not stored as an input.** The backward pass hangs from the finish date, and the project start is the earliest late start. It settles in two passes because late dates almost never depend on the start. Tasks that were As Soon As Possible before the switch stay that way (as in Project); only new tasks are As Late As Possible. **Leveling such a plan** still delays tasks forward, keeping the start fixed while it works, so it can push the plan past its finish date (shown as negative slack). Project levels finish-scheduled plans backward; that's not done yet.
 71. **The Network Diagram lays itself out**, in columns by link order with summaries one column before their subtasks. Project lets you drag boxes; ProjectFCG doesn't yet, so the layout is recomputed whenever the plan changes and two people always see the same diagram.
+72. **The risk matrix's cells follow the guides, and you can recolour them.** The DoD guide gives its 5×5 matrix as a figure rather than a table. ProjectFCG uses the layout reproduced in DAU and service guidance: green down the minimal-consequence column, red only where likelihood and consequence are both high (L4–5 × C4–5 and L3 × C5), yellow between. Programs tailor theirs, so any cell can be recoloured (right-click). The custom colours belong to the register's standard and are reset when it changes. PMI's cells come from its P × I thresholds, and "no standard" uses L × I (Medium ≥ 5, High ≥ 15).
+73. **Issues are rated on consequence alone** (DoD: an issue has already happened): consequence 1–2 is Low, 3 Moderate, 4–5 High. Each consequence dimension (cost, schedule, performance) is rated separately and the worst sets the level, as both guides do. A rating entered under another standard keeps its worst level until you split it by dimension, so switching the standard never changes a risk silently.
+74. **Risk links to deleted tasks stay until the file is reopened.** Undoing a task's deletion should bring its risks' links back. So, while the plan is open, a link to a deleted task shows as "Task (deleted)". Opening the file drops links to things that are gone.
 
 ## Not yet implemented (Roadmap)
 
@@ -466,13 +485,13 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 | ~~Resources~~ | Done in 0.3. Still open: work contours, overtime, time-phased cost accrual, resource pools, Team Planner, generic/budget resources, leveling that splits tasks |
 | ~~Interop~~ | MSPDI XML import/export done in 0.6; task calendars and custom fields in 0.9; print/PDF in 0.9. Still open: `.mpp` reading, splits and outline codes in XML |
 | ~~Tracking~~ | Done in 0.6; slippage bars in 0.8; physical % complete in 0.10. Still open: actual work entered per assignment, time-phased actuals |
-| ~~Views~~ | Network Diagram and Calendar in 0.10. Still open: Team Planner, dragging boxes in the Network Diagram, a week/day Calendar |
+| ~~Views~~ | Network Diagram and Calendar in 0.10. Still open: Team Planner, dragging boxes in the Network Diagram, a week/day Calendar. Risk register in 0.10; still open: Monte Carlo schedule risk, risk import from Excel |
 | Later | Drawings, custom field formulas and value lists, outline codes, multi-level groups, AutoFilter on column headers, split tasks, work weeks in calendars, a high-contrast theme, embedded fonts in PDFs |
 
 ## Building from source
 
 ```sh
-cargo test                          # 401 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, invariants, UI (headless)
+cargo test                          # 414 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, risk register, invariants, UI (headless)
 cargo test --release --test perf -- --ignored --nocapture   # timings on 500–5,000-task projects
 cargo run --release -- --sample
 ./packaging/build-appimage.sh       # → dist/ProjectFCG-x86_64.AppImage
@@ -526,7 +545,7 @@ Double-clicking a `.pfcg` file doesn't open it there yet; use File ▸ Open.
 
 ## Tests
 
-* `src/*` unit tests (49): CSV parsing (quotes, embedded newlines, BOM, `;` files), Jira dates and headers, ISO 8601 durations, MSPDI duration/lag format codes and day types, calendar arithmetic (including fast paths checked against a day-by-day reference), duration/lag parsing and formatting, date parsing, shortcut map, timescale presets, working-time parsing, sample project, theme contrast (every accent × mode against WCAG targets), dark-mode colour adaptation, desktop theme detection replies, preference migration.
+* `src/*` unit tests (57): CSV parsing (quotes, embedded newlines, BOM, `;` files), Jira dates and headers, ISO 8601 durations, MSPDI duration/lag format codes and day types, calendar arithmetic (including fast paths checked against a day-by-day reference), duration/lag parsing and formatting, date parsing, shortcut map, timescale presets, working-time parsing, sample project, risk matrices for each standard, theme contrast (every accent × mode against WCAG targets), dark-mode colour adaptation, desktop theme detection replies, preference migration.
 * `tests/invariants.rs`: 11 seeded randomized tests (the newest: 120 random projects with sprints, stories, board dependencies with % and day lags and inactive tasks, where the fast leveler must equal the reference, scheduling must be idempotent, and every task must start after the sprint it waits on) on generated projects (up to 200 tasks, all link types, lags, constraints, manual tasks, vacations, mixed task types). They check that links are honoured, slack matches critical, summaries roll up dates, work and cost, Work = Units × span, saving and loading is exact, scheduling is idempotent, 25 random edits undo and redo exactly, the fast leveler equals the reference on 80 projects (including selection-only leveling), and leveling clears every overallocation that is possible to clear.
 * `tests/scheduling.rs`: 46 behaviour tests whose expected dates were derived by hand from Project's rules (Standard calendar, project start Mon 1/5/2026). They cover all link types, lags and leads, constraints and conflicts, ALAP, deadlines, holidays, elapsed time, manual tasks, summaries, slack, editing operations, undo, file round-trip, and a 2,000-task performance check.
 * `tests/analysis.rs`: 12 tests for start drivers, multiple critical paths, start/finish slack, Task Path sets (including through summary links), Status/Late rollups, baselines, and loading 0.1.0 files.
@@ -537,10 +556,11 @@ Double-clicking a `.pfcg` file doesn't open it there yet; use File ▸ Open.
 * `tests/core_regressions.rs`: 13 tests, one per finding of the 0.9 bug hunt.
 * `tests/safety.rs`: 5 tests: an edit that panics is undone and reported (the report never holds the plan); a frame that panics closes dialogs and the app keeps running; repeated panics go back to the last plan that drew, and give up after four; AutoRecover copies unsaved work in the background, removes it once saved, never offers a running window's copy, and the next start opens it as an unsaved plan; a normal close leaves nothing behind.
 * `tests/review_10.rs`: 9 tests, one per finding of the 0.10 review (recovery asking first and keeping its copy, rolling back a dialog's edit, concurrent and symlinked saves, Replace on dates, Move Task on finish constraints, typed dates in finish-scheduled plans, Fill Down when sorted, a woken window's copy).
-* `tests/fuzz_stability.rs`: four seeded, bounded fuzzing campaigns: random edits with extreme values, every app command plus random clicks and keys, thousands of mutated `.pfcg`, Project XML and Jira CSV files, and calendar math. Nothing may panic, and no step may take over 20 s. Set `FUZZ_SCALE=20` for a long exploration run. `tests/fuzz_repros.rs` has one minimal test per crash the campaign found.
+* `tests/fuzz_stability.rs`: four seeded, bounded fuzzing campaigns: random edits with extreme values, every app command plus random clicks and keys in every view (the Risk Register included), thousands of mutated `.pfcg`, Project XML and Jira CSV files, and calendar math. Nothing may panic, and no step may take over 20 s. Set `FUZZ_SCALE=20` for a long exploration run. `tests/fuzz_repros.rs` has one minimal test per crash the campaign found.
 * `tests/jobs.rs`: 2 tests: a large plan levels in the background with the same result as leveling in place, nothing else can change the plan meanwhile, and Cancel changes nothing.
 * `tests/project_tools.rs`: 6 tests: Sort with and without the outline, built-in sorts and back to ID; renumbering moving whole summaries with links intact; Find in any field both ways, opening collapsed summaries; Replace and Replace All (one undo step, all or nothing, Resource Names reassigning); Move Task on auto, manual, constrained, summary and started tasks; Physical % Complete in earned value, the default method, and Project XML.
 * `tests/from_finish.rs`: 4 tests: tasks hanging from the finish date with the start worked out, ASAP tasks starting with the project, negative slack when a task can't make the date, files, Project XML and undo.
+* `tests/risks.rs`: 12 tests: each standard's levels and scores for the same cell (DoD matrix, PMI P × I, L × I, issues), the worst dimension and per-risk standards, custom matrix colours, statements and EMV, links, IDs never reused and repair, files (and files from before the register), CSV, the sample's register, and the Risk Register view: looking at every risk under every standard changes nothing, edits are one undo step that Undo reloads, Insert and Delete act on risks, and Add Risk for Task.
 * `tests/task_views.rs`: 4 tests: Network Diagram columns following links and summaries (and surviving a loop), Calendar weeks, spans across week rows and lanes, and both views selecting a task on click and opening Task Information on double-click.
 * `tests/views.rs`: 14 tests: custom filters comparing durations, dates, money and text by type, And/Or precedence, Within, related summary rows, Date Range and Using Resource, Group By (built-in and by field, rollups, collapsing, with filters), saving, undo and validation, and the 0.8 review's findings.
 * `tests/releases.rs`: 10 tests: progress, projection and risk as stories move between sprints, what can carry a release, a milestone following its release (and the tasks linked to it), loops reported, releasing with carry-over, repairing files, Fix Version/s in Jira CSV, and the 0.8 review's findings.
@@ -569,6 +589,7 @@ src/resources.rs  resources, assignments, task-type rules, costs, overallocation
 src/leveling.rs   resource leveling (dependency-ordered, lazy forward pass)
 src/board.rs      Kanban tickets, issue types, epics, sub-tasks, links, sprints, progress, burndown, velocity, cumulative flow
 src/releases.rs   releases (fix versions): progress, projection, milestones
+src/risks.rs      risk register: risks/opportunities/issues, DoD and PMI scales, levels, matrix, CSV
 src/views.rs      custom filter definitions (saved in the file)
 src/calendars.rs  base calendars for tasks
 src/custom_fields.rs  Text/Number/Flag/Date/Cost custom fields
@@ -588,7 +609,7 @@ src/app/          egui front end (ribbon, table, gantt, bars, timeline, inspecto
                   resource sheet, usage views, resource dialogs, themes, system theme detection,
                   board view, tracking and import dialogs, filters and groups, release dialogs, print,
                   safety (caught panics, AutoRecover), jobs (background leveling), sort, find/replace,
-                  move tasks, network diagram, calendar view)
+                  move tasks, network diagram, calendar view, risk register)
 examples/xmldump.rs  writes the samples as MS Project XML (for checking with other tools)
 examples/screens.rs  renders the README screenshots (`xvfb-run cargo run --release --example screens -- docs board`)
 examples/profile.rs  profiling driver (callgrind: `cargo build --profile profiling --example profile`)

@@ -1006,7 +1006,7 @@ fn random_command(r: &mut Rng, app: &ProjectFcgApp) -> Command {
             2 => SetGanttView(*r.pick(&[GanttViewKind::Gantt, GanttViewKind::Tracking, GanttViewKind::Detail, GanttViewKind::Leveling])),
             _ => SetEstimate(*r.pick(&projectfcg::board::Estimate::ALL)),
         },
-        13 => ShowView(*r.pick(&[MainView::Gantt, MainView::TaskUsage, MainView::ResourceSheet, MainView::ResourceUsage, MainView::Board])),
+        13 => ShowView(*r.pick(&[MainView::Gantt, MainView::TaskUsage, MainView::ResourceSheet, MainView::ResourceUsage, MainView::Board, MainView::NetworkDiagram, MainView::Calendar, MainView::Risks])),
         14 => AddResource(*r.pick(&[ResourceType::Work, ResourceType::Material, ResourceType::Cost])),
         15 => SetTable(*r.pick(&[Table::Entry, Table::Schedule, Table::Tracking, Table::Cost, Table::Work, Table::EarnedValue, Table::Variance])),
         16 => SetShownBaseline(r.below(13) as u8),
@@ -1628,7 +1628,7 @@ fn exercise_file(kind: Kind, text: &str, frames: bool, f: &mut Findings, ctx: &s
         let r = guarded(|| {
             let mut u = Ui::new(p);
             let ctx = u.ctx.clone();
-            for v in [MainView::Gantt, MainView::TaskUsage, MainView::ResourceUsage, MainView::Board, MainView::ResourceSheet] {
+            for v in [MainView::Gantt, MainView::TaskUsage, MainView::ResourceUsage, MainView::Board, MainView::ResourceSheet, MainView::NetworkDiagram, MainView::Calendar, MainView::Risks] {
                 u.app.execute(Command::ShowView(v), &ctx);
                 u.frame(vec![]);
             }

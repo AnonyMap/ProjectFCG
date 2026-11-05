@@ -652,6 +652,11 @@ pub struct Project {
     /// (the earliest late start).
     #[serde(default)]
     pub finish_date: Option<NaiveDateTime>,
+    /// The risk register (risks, opportunities, issues).
+    #[serde(default)]
+    pub risks: Vec<crate::risks::Risk>,
+    #[serde(default)]
+    pub risk_settings: crate::risks::RiskSettings,
     #[serde(skip)]
     pub calc: ProjectCalc,
 }
@@ -714,6 +719,8 @@ impl Project {
             calendars: vec![],
             custom_aliases: Default::default(),
             finish_date: None,
+            risks: vec![],
+            risk_settings: Default::default(),
             calc: ProjectCalc::default(),
         }
     }
