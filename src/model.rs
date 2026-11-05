@@ -647,6 +647,11 @@ pub struct Project {
     /// Custom field renames (Project ▸ Custom Fields): "Text1" → "Team".
     #[serde(default)]
     pub custom_aliases: std::collections::BTreeMap<String, String>,
+    /// Project Information ▸ Schedule from: Project Finish Date. When set,
+    /// the plan is scheduled back from this date and `start` is computed
+    /// (the earliest late start).
+    #[serde(default)]
+    pub finish_date: Option<NaiveDateTime>,
     #[serde(skip)]
     pub calc: ProjectCalc,
 }
@@ -708,6 +713,7 @@ impl Project {
             views: Default::default(),
             calendars: vec![],
             custom_aliases: Default::default(),
+            finish_date: None,
             calc: ProjectCalc::default(),
         }
     }

@@ -316,9 +316,9 @@ pub fn to_xml(p: &Project) -> String {
     if !p.manager.is_empty() {
         w.el("Manager", &p.manager);
     }
-    w.el("ScheduleFromStart", "1");
+    w.el("ScheduleFromStart", if p.finish_date.is_some() { "0" } else { "1" });
     w.el("StartDate", dt(p.start));
-    w.opt("FinishDate", p.calc.finish.map(dt));
+    w.opt("FinishDate", p.finish_date.or(p.calc.finish).map(dt));
     // whole days in MSPDI; rounded rather than truncated
     w.el("CriticalSlackLimit", ((s.critical_slack_threshold as f64 / s.durations.minutes_per_day.max(1) as f64).round() as i64).to_string());
     w.el("CurrencySymbol", &s.currency_symbol);
@@ -927,7 +927,10 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         }
     }
     if flag(root, "ScheduleFromStart") == Some(false) {
-        warnings.push("The project was scheduled from its finish date; ProjectFCG schedules forward from the start date.".into());
+        match date_time(root, "FinishDate") {
+            Some(f) => p.finish_date = Some(f),
+            None => warnings.push("The project is scheduled from its finish date, but the file gives no finish date; it's scheduled from its start instead.".into()),
+        }
     }
 
     // ---- custom field names (task fields we know; others are reported) ----

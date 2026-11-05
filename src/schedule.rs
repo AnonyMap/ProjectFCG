@@ -518,7 +518,27 @@ pub fn schedule(p: &mut Project) {
     // sprint progress comes from the Kanban board
     p.apply_sprint_progress();
     let prep = prepare(p);
-    run(p, &prep, true);
+    match p.finish_date {
+        None => run(p, &prep, true),
+        Some(fin) => {
+            // Scheduled from the finish: late dates come back from the
+            // finish date, and the project starts at the earliest late
+            // start. Late dates hardly ever depend on the start, so this
+            // settles on the second pass; the cap guards odd calendars.
+            for k in 0..4 {
+                run(p, &prep, true);
+                let s = (0..p.tasks.len())
+                    .filter(|&i| !prep.st.is_summary[i] && !prep.st.inactive[i] && p.tasks[i].mode == TaskMode::Auto)
+                    .filter_map(|i| p.tasks[i].calc.late_start)
+                    .min()
+                    .unwrap_or_else(|| prep.cal.sub_work(fin, 0));
+                if s == p.start || k == 3 {
+                    break;
+                }
+                p.start = s;
+            }
+        }
+    }
 }
 
 /// Leveling's cheap reschedule: dates only (forward pass, ALAP placement
@@ -567,11 +587,14 @@ fn run(p: &mut Project, prep: &Prepared, full: bool) {
 
     // inactive tasks don't set the project finish (unless nothing is active)
     let any_active = (0..n).any(|i| !st.is_summary[i] && !st.inactive[i]);
-    let project_finish = (0..n)
+    let early_finish = (0..n)
         .filter(|&i| !st.is_summary[i] && (!any_active || !st.inactive[i]))
         .filter_map(|i| ef[i])
         .max()
         .unwrap_or(p.start);
+    // scheduled from the finish date: everything hangs from it (tasks that
+    // can't make it show negative slack)
+    let project_finish = p.finish_date.unwrap_or(early_finish);
 
     // ---------------- backward pass (+ ALAP placement) ----------------
     let mut ls: Vec<Option<NaiveDateTime>> = vec![None; n];
@@ -689,7 +712,7 @@ fn run(p: &mut Project, prep: &Prepared, full: bool) {
                 c.start_driver = driver[i];
             }
         }
-        p.calc.finish = Some(project_finish);
+        p.calc.finish = Some(early_finish.max(project_finish));
         crate::resources::update_assignment_dates(p);
         return;
     }
@@ -833,7 +856,7 @@ fn run(p: &mut Project, prep: &Prepared, full: bool) {
         c.board_notes = g.board_notes[i].clone();
         p.tasks[i].calc = c;
     }
-    p.calc.finish = Some(project_finish);
+    p.calc.finish = Some(early_finish.max(project_finish));
     p.calc.errors = g.errors.clone();
     p.calc.errors.extend(sp.warnings.iter().cloned());
     crate::resources::compute_resources(p);

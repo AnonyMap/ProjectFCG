@@ -39,6 +39,11 @@ impl Project {
         t.task_type = self.settings.default_task_type;
         t.effort_driven = self.settings.new_tasks_effort_driven;
         t.ev_method = self.settings.default_ev_method;
+        // in a plan scheduled from its finish, new tasks are As Late As
+        // Possible (as in Project)
+        if self.finish_date.is_some() {
+            t.constraint = ConstraintType::ALAP;
+        }
         t
     }
 

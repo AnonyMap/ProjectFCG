@@ -79,6 +79,9 @@ pub struct ProjectInfo {
     pub title: String,
     pub manager: String,
     pub start: String,
+    /// Schedule from: Project Finish Date (and the date).
+    pub from_finish: bool,
+    pub finish: String,
     pub status_date: String,
     pub base: String,
 }
@@ -297,6 +300,8 @@ impl Dialogs {
             title: p.title.clone(),
             manager: p.manager.clone(),
             start: fmt_datetime(p.start),
+            from_finish: p.finish_date.is_some(),
+            finish: fmt_datetime(p.finish_date.or(p.calc.finish).unwrap_or(p.start)),
             status_date: p.status_date.map(fmt_datetime).unwrap_or_else(|| "NA".into()),
             base: p.calendar.name.clone(),
         });
@@ -974,13 +979,28 @@ fn project_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
             ui.add(egui::TextEdit::singleline(&mut st.manager).desired_width(300.0));
             ui.end_row();
             ui.label("Start date:");
-            date_field(ui, &mut st.start, "pi_start", fallback);
+            if st.from_finish {
+                ui.label(fmt_datetime(app.project.start)).on_hover_text("Scheduled back from the finish date: the start is worked out");
+            } else {
+                date_field(ui, &mut st.start, "pi_start", fallback);
+            }
             ui.end_row();
             ui.label("Finish date:");
-            ui.label(finish.map(fmt_datetime).unwrap_or_default());
+            if st.from_finish {
+                date_field(ui, &mut st.finish, "pi_finish", fallback);
+            } else {
+                ui.label(finish.map(fmt_datetime).unwrap_or_default());
+            }
             ui.end_row();
             ui.label("Schedule from:");
-            ui.label("Project Start Date");
+            egui::ComboBox::from_id_salt("pi_from")
+                .selected_text(if st.from_finish { "Project Finish Date" } else { "Project Start Date" })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut st.from_finish, false, "Project Start Date");
+                    ui.selectable_value(&mut st.from_finish, true, "Project Finish Date");
+                })
+                .response
+                .on_hover_text("From the finish date: tasks are scheduled as late as possible so the project ends on that date; new tasks are As Late As Possible.");
             ui.end_row();
             ui.label("Current date:");
             ui.label(fmt_date(chrono::Local::now().naive_local()));
@@ -1024,7 +1044,12 @@ fn project_info(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         .edit_project("Project Information", move |p| {
             p.title = s2.title.clone();
             p.manager = s2.manager.clone();
-            p.start = parse_date(&s2.start, p.default_start_time())?;
+            if s2.from_finish {
+                p.finish_date = Some(parse_date(&s2.finish, p.default_finish_time())?);
+            } else {
+                p.finish_date = None;
+                p.start = parse_date(&s2.start, p.default_start_time())?;
+            }
             let sd = s2.status_date.trim();
             p.status_date = if sd.is_empty() || sd.eq_ignore_ascii_case("na") {
                 None
