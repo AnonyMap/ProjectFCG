@@ -211,7 +211,8 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
                 // progress inside the bar
                 let pct = (t.calc.percent_complete / 100.0).clamp(0.0, 1.0) as f32;
                 if pct > 0.0 {
-                    let pr = Rect::from_min_max(pos2(br.left(), br.center().y - 2.0), pos2(br.left() + br.width() * pct, br.center().y + 2.0));
+                    // along the bottom edge, clear of the label
+                    let pr = Rect::from_min_max(pos2(br.left(), br.bottom() - 4.0), pos2(br.left() + br.width() * pct, br.bottom()));
                     clip.rect_filled(pr, 0.0, line);
                 }
                 clip.rect_stroke(br, 3.0, Stroke::new(if sel { 2.4 } else { 1.0 }, if sel { pal.accent } else { line }), egui::StrokeKind::Inside);

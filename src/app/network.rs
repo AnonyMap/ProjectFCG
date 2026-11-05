@@ -19,7 +19,7 @@ use crate::model::TaskMode;
 use egui::{pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke};
 use std::collections::HashMap;
 
-pub const BOX_W: f32 = 196.0;
+pub const BOX_W: f32 = 212.0;
 pub const BOX_H: f32 = 84.0;
 const GAP_X: f32 = 64.0;
 const GAP_Y: f32 = 26.0;
@@ -86,6 +86,19 @@ pub fn layout(p: &crate::model::Project, rows: &[usize]) -> Layout {
             if indeg[w] == 0 {
                 queue.push_back(w);
             }
+        }
+    }
+    // a summary sits just before its first subtask, not wherever its own
+    // links (often none) would put it; deepest summaries first
+    let mut by_depth: Vec<usize> = (0..n).filter(|&k| p.tasks[rows[k]].calc.is_summary).collect();
+    by_depth.sort_by_key(|&k| std::cmp::Reverse(p.tasks[rows[k]].outline_level));
+    for k in by_depth {
+        let kids: Vec<usize> = out[k].iter().copied().filter(|&w| p.parent_of(rows[w]) == Some(rows[k])).collect();
+        let linked: Vec<usize> = out[k].iter().copied().filter(|w| !kids.contains(w)).collect();
+        if let Some(first) = kids.iter().map(|&w| col[w]).min() {
+            // as far right as its children and its own successors allow
+            let limit = linked.iter().map(|&w| col[w]).min().map_or(usize::MAX, |c| c.saturating_sub(1));
+            col[k] = col[k].max(first.saturating_sub(1)).min(limit.max(col[k]));
         }
     }
     let ncols = col.iter().copied().max().map_or(0, |m| m + 1);
@@ -281,7 +294,7 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
         }
         // progress marks: X when done, / when under way
         let pct = c.percent_complete;
-        let mark = Stroke::new(1.0, line.gamma_multiply(0.6));
+        let mark = Stroke::new(1.0, line.gamma_multiply(0.35));
         if pct >= 100.0 {
             painter.line_segment([b.left_top(), b.right_bottom()], mark);
             painter.line_segment([b.left_bottom(), b.right_top()], mark);
@@ -291,7 +304,9 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
         if z < 0.45 {
             continue; // too small to read: shapes only
         }
-        let inner = b.shrink(6.0 * z);
+        // inside the slanted sides of summaries and milestones
+        let slant = if summary || milestone { b.height() * 0.18 } else { 0.0 };
+        let inner = b.shrink2(vec2(6.0 * z + slant, 6.0 * z));
         let clip = painter.with_clip_rect(inner.intersect(rect));
         let name = if t.active { t.name.clone() } else { format!("{} (inactive)", t.name) };
         clip.text(pos2(inner.center().x, inner.top()), Align2::CENTER_TOP, name, bold.clone(), pal.text);
@@ -306,8 +321,9 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
         ];
         for (k, (l, rt)) in rows_txt.iter().enumerate() {
             let y = y0 + k as f32 * lh;
-            clip.text(pos2(inner.left(), y), Align2::LEFT_TOP, l, small.clone(), pal.text);
-            clip.text(pos2(colx, y), Align2::LEFT_TOP, rt, small.clone(), pal.text);
+            let lr = clip.text(pos2(inner.left(), y), Align2::LEFT_TOP, l, small.clone(), pal.text);
+            // the right column after the left text, however long the date
+            clip.text(pos2(colx.max(lr.right() + 6.0 * z), y), Align2::LEFT_TOP, rt, small.clone(), pal.text);
         }
         let res = p.resource_names_text(r);
         if !res.is_empty() || !summary {
