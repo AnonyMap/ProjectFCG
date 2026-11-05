@@ -20,7 +20,7 @@
 use crate::calendar::Calendar;
 use crate::duration::Lag;
 use crate::model::{ConstraintType, Link, LinkType, Project, StartDriver, TaskMode, TaskStatus};
-use chrono::{Duration as ChronoDur, NaiveDateTime};
+use chrono::NaiveDateTime;
 use std::collections::VecDeque;
 
 /// Outline structure derived from outline levels.
@@ -358,13 +358,13 @@ impl Ctx<'_> {
         if lag_mins == 0 {
             dt
         } else if elapsed {
-            dt + ChronoDur::minutes(lag_mins)
+            crate::calendar::plus_minutes(dt, lag_mins)
         } else {
             self.cal.add_work(dt, lag_mins)
         }
     }
     fn unshift(&self, dt: NaiveDateTime, lag_mins: i64, elapsed: bool) -> NaiveDateTime {
-        self.shift(dt, -lag_mins, elapsed)
+        self.shift(dt, lag_mins.saturating_neg(), elapsed)
     }
 }
 
@@ -455,7 +455,7 @@ impl SpanSet {
     }
     fn finish(&self, t: usize, s: NaiveDateTime) -> NaiveDateTime {
         if self.elapsed[t] {
-            return s + ChronoDur::minutes(self.mins[t]);
+            return crate::calendar::plus_minutes(s, self.mins[t]);
         }
         self.parts[t]
             .iter()
@@ -465,7 +465,7 @@ impl SpanSet {
     }
     fn start(&self, t: usize, f: NaiveDateTime) -> NaiveDateTime {
         if self.elapsed[t] {
-            return f - ChronoDur::minutes(self.mins[t]);
+            return crate::calendar::plus_minutes(f, self.mins[t].saturating_neg());
         }
         self.parts[t]
             .iter()
@@ -482,11 +482,14 @@ impl SpanSet {
 }
 
 fn lag_minutes(lag: &Lag, pred_duration: i64) -> (i64, bool) {
+    // a lag (or a % of a long predecessor) never reaches past a century:
+    // dates stay where calendar arithmetic is quick and exact
+    let cap = crate::duration::MAX_MINUTES;
     match lag {
         Lag::Time {
             minutes, elapsed, ..
-        } => (*minutes, *elapsed),
-        Lag::Percent(pct) => (((pred_duration as f64) * pct / 100.0).round() as i64, false),
+        } => ((*minutes).clamp(-cap, cap), *elapsed),
+        Lag::Percent(pct) => (((pred_duration as f64) * pct / 100.0).round().clamp(-cap as f64, cap as f64) as i64, false),
     }
 }
 
@@ -1172,7 +1175,7 @@ pub fn refresh_structure(p: &mut Project) {
                 TaskMode::Auto => cal.next_working_start(pstart),
             };
             let f = if t.duration.elapsed {
-                s + ChronoDur::minutes(t.duration.minutes)
+                crate::calendar::plus_minutes(s, t.duration.minutes)
             } else {
                 cal.add_work(s, t.duration.minutes)
             };

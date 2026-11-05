@@ -1,7 +1,7 @@
 # ProjectFCG
 
 A Gantt-chart project scheduler for Linux, written in Rust, whose scheduling
-engine follows Microsoft Project's rules. Version 0.9.0 covers **core
+engine follows Microsoft Project's rules. Version 0.10.0 covers **core
 scheduling** (0.1), **Gantt formatting, critical path analysis, baselines and
 adjustable text size** (0.2), **resources, assignments, costs and leveling**
 (0.3), **themes with dark mode** plus a performance pass (0.4), a
@@ -12,7 +12,9 @@ board and the schedule, Jira's sprint lifecycle, swimlanes and WIP limits,
 recurring and inactive tasks** (0.7), and **Group By and custom filters,
 releases tied to the schedule, cumulative flow, slippage bars and Copy
 Picture** (0.8), and **printing to PDF, task calendars, custom fields and
-updates through Gear Lever** (0.9).
+updates through Gear Lever** (0.9), and **crash safety with AutoRecover, the
+Network Diagram and Calendar views, Sort, Find and Replace, Move Task and
+scheduling from the finish date** (0.10).
 
 *FCG* = Fast, Cheap, Good: pick two.
 
@@ -335,8 +337,44 @@ A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets 
 * Intersecting calendars wrote long exceptions out day by day and stopped after ten years, so a task could be scheduled during a resource's 14-year absence, and scheduling 5,000 tasks with task calendars took 14× longer. Exceptions now intersect as date ranges.
 * Number custom fields were rounded to 2 places by Fill Down and in Project XML (0.001 was lost). Clicking a bar then pressing Delete cleared a field instead of deleting the task. Printing a date range drew labels of bars outside it over the table. A pasted task could keep a deleted calendar and silently join the next one created. The filter dialog's field list rescanned every task 50 times a frame. A stray build file was committed.
 
+### New in 0.10: stability, Network Diagram, Calendar, sort, find and replace, schedule from finish
+
+**Stability**
+
+* **A bug no longer closes the window.** An edit that hits an internal error is undone and reported, and the plan stays as it was. A problem while drawing closes whatever dialog was open. If it happens again, ProjectFCG goes back to the last plan that drew cleanly. Either way it keeps running, and it says so in a notice.
+* **AutoRecover** (File ▸ Options, every 5 minutes by default) copies unsaved work to `~/.local/state/projectfcg/recovery` from a background thread. If the window is killed, the computer loses power, or something does crash, the next start offers the copy back. It opens as a new plan, so saving it never overwrites anything without asking. A second ProjectFCG window that's still running is never mistaken for a crash.
+* **Crash reports** go to `~/.local/state/projectfcg/crash-reports`. They hold what failed and where, never the plan's contents, and they're worth attaching to a GitHub issue.
+* **Saving can't truncate a file.** Saves, exports and preferences are written to a temporary file, flushed to disk, then renamed over the old one.
+* **Damaged files open.** An automated fuzzing campaign (thousands of mutated files, random edits and random clicks) found the crashes listed below. Every file opened now has its values pulled into range first: dates between 1900 and 2200, durations and lags within 100 years, finite numbers, unique IDs. A file whose numbers can't be right opens rather than crashing.
+* **Large plans level in the background** with a progress bar and Cancel, so the window never stops responding. Plans with ALAP tasks also level 2–3× faster.
+
+**New views** (View ▸ Network Diagram, Calendar)
+
+* **Network Diagram**: each task is a box with its name, start, ID, finish, duration and resources, in columns by the order the work happens. Critical tasks are red. Finished tasks are crossed out and tasks under way half crossed. Milestones are hexagons, summaries parallelograms, manual tasks dashed. Drag to pan, Ctrl+scroll to zoom, double-click for Task Information.
+* **Calendar**: a month of weeks with the tasks as bars across the days they run, wrapping from week to week, with "+N more" when a week is full. ◀ ▶ and the mouse wheel change month.
+
+![The Network Diagram: the sample's tasks as boxes in columns, critical path in red](docs/network.png)
+
+![The Calendar view: a month with the tasks as bars across their days](docs/calendar-view.png)
+
+**Project's everyday tools**
+
+* **Sort** (View ▸ Sort): by Start Date, Finish Date, Priority, Cost or ID, or *Sort By…* up to three fields, ascending or descending. The outline is kept, so subtasks sort under their summary, unless you untick that. *Permanently renumber tasks* reorders the plan itself. Sorting works inside groups too.
+* **Find and Replace** (Ctrl+F, Ctrl+H): any field, any test (contains, equals, is greater than…), down or up, match case. They follow the current filter and sort and open collapsed summaries to show a match. **Replace All** is one undo step, and all or nothing: if one replacement is invalid, nothing changes. Replacing a name in Resource Names reassigns the work.
+* **Move Task** (Task ▸ Move): forward or back 1 day, 1 week, 4 weeks or any number of working days. As in Project, auto-scheduled tasks get a *Start No Earlier Than* constraint, date constraints move with them, manual tasks just move, summaries move their subtasks, and started tasks stay put. Also *When Resources Are Available* and *Incomplete Parts to Status Date*.
+* **Schedule from the project finish date** (Project Information): tasks are scheduled as late as possible so the project ends on that date, and the start is worked out. New tasks are As Late As Possible, and tasks that can't make the date show negative slack. Project XML files scheduled this way now import as such.
+* **Physical % Complete** and **Earned Value Method** (per task, with a project default in Options): earned value can measure work done rather than time spent. They're in the Tracking table and in Project XML.
+
+![Sort By over the sample, sorted by Finish Date](docs/sort.png)
+
+**Crashes found by fuzzing** (all fixed and pinned by `tests/fuzz_repros.rs`; `tests/fuzz_stability.rs` keeps fuzzing on every test run)
+
+* Right-clicking a task and choosing **Cut Task** or **Delete Task** crashed every time: the table went on drawing rows that no longer existed.
+* Opening a file with a duration or lag of −9.2×10¹⁸ minutes overflowed the stack, which nothing can catch. Dates near the end of chrono's range (typed, or in a file), huge elapsed lags, and a recurring series starting in year 262142 crashed or hung the date arithmetic.
+* A task ID of 4294967295 in a file made new tasks reuse existing IDs. A 1,000-year working exception made each calculation take seconds; exceptions are now looked up by binary search and corrected per stretch rather than per day.
+
 ### Keyboard shortcuts (Microsoft Project's)
-Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task Information) · Ctrl+F2 / Ctrl+Shift+F2 (link / unlink) · Alt+Shift+→/← (indent/outdent) · Alt+Shift+↑/↓ (move) · Alt+Shift+− / = / Numpad* (hide / show / show all subtasks) · Ctrl+Shift+M / Ctrl+Alt+Shift+A (manual / auto) · Ctrl+Shift+F5 (scroll to task) · F5 (Go To) · Ctrl+F, Shift+F4 (find / next) · F9, Ctrl+F9 (calculate / auto-calc) · Ctrl+/ and Ctrl+* (zoom) · Alt+Home/End, Alt+←/→, Alt+PgUp/PgDn (timescale) · Ctrl+D (fill down) · Ctrl+Delete (reset field) · Ctrl+Shift+F11 (light/dark) · Ctrl+Z/Y, Ctrl+X/C/V, Ctrl+N/O/S, F12 · Alt+F10 (Assign Resources). The full list is under Help ▸ Keyboard Shortcuts or F1.
+Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task Information) · Ctrl+F2 / Ctrl+Shift+F2 (link / unlink) · Alt+Shift+→/← (indent/outdent) · Alt+Shift+↑/↓ (move) · Alt+Shift+− / = / Numpad* (hide / show / show all subtasks) · Ctrl+Shift+M / Ctrl+Alt+Shift+A (manual / auto) · Ctrl+Shift+F5 (scroll to task) · F5 (Go To) · Ctrl+F, Ctrl+H, Shift+F4 (find / replace / next) · F9, Ctrl+F9 (calculate / auto-calc) · Ctrl+/ and Ctrl+* (zoom) · Alt+Home/End, Alt+←/→, Alt+PgUp/PgDn (timescale) · Ctrl+D (fill down) · Ctrl+Delete (reset field) · Ctrl+Shift+F11 (light/dark) · Ctrl+Z/Y, Ctrl+X/C/V, Ctrl+N/O/S, F12 · Alt+F10 (Assign Resources). The full list is under Help ▸ Keyboard Shortcuts or F1.
 
 ## Decisions I made (please review)
 
@@ -404,6 +442,13 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 62. **One rule for which calendar a task works on, used everywhere.** The scheduler, typed and dragged finishes, actuals, % complete, earned value, the progress line, assignment dates, Resource Usage and leveling all measure a task on the same calendar: its own calendar ∩ each resource's (or just its own when it ignores resource calendars), or the resource's calendar, or the project's. For a task with several resources on different calendars, the single-number measures (actual finish → duration, % scheduled) use the first work resource's. In 0.9's first draft these places each worked it out for themselves and disagreed, which is what the review below caught.
 63. **Ten of each custom field type, not Project's 30 Text and 20 Number.** Values a Project XML file has in fields beyond those (and outline codes) are listed after import. Custom fields have no formulas or value lists yet, and summaries don't roll them up.
 64. **Delete with a whole row selected deletes the task.** Clicking the row number or a bar in the chart, Shift+Space or Select All selects whole rows; clicking a cell or moving with the arrow keys selects cells again.
+65. **AutoRecover writes a copy, never your file.** Project's *Auto Save* overwrites the project file itself every N minutes. That's risky when you're experimenting and expect to discard changes, so ProjectFCG keeps a separate recovery copy instead (Office's AutoRecover model) and deletes it on a normal close or save.
+66. **After an internal error the window keeps running, in steps.** First only transient state (open dialogs, a cell being edited, a drag) is dropped. If the error repeats on the next frame, the last plan that drew cleanly is restored, the undo history is cleared (its steps would no longer apply), and the view goes back to a plain Gantt Chart. After four in a row it writes a recovery copy and closes, rather than spinning. Edits that fail are undone by the copy `edit_project` already takes, so a failed edit costs nothing.
+67. **Dates are 1900–2200.** Project allows 1984–2149. A wider range keeps old and long-range plans working while staying far from where date arithmetic overflows. Typed dates outside it are refused; dates in files are clamped, with a note after a Project XML import.
+68. **Large plans level on a copy in the background** (1,500+ tasks, or 300+ with ALAP tasks), and nothing can be edited until it finishes or is cancelled, so the result never lands on a plan that changed meanwhile. Smaller plans level in place, as before.
+69. **Move Task and Sort follow Project.** Moving an auto-scheduled task sets *Start No Earlier Than* rather than changing the task's dependencies, so the move is visible and undoable in Task Information. A view sort leaves IDs alone, so links and "Task 12" still mean the same thing; only *Permanently renumber* changes them. A date constraint other than SNET keeps its type and moves its date.
+70. **Schedule from finish: the start is worked out, not stored as an input.** The backward pass hangs from the finish date, and the project start is the earliest late start. It settles in two passes because late dates almost never depend on the start. Tasks that were As Soon As Possible before the switch stay that way (as in Project); only new tasks are As Late As Possible.
+71. **The Network Diagram lays itself out**, in columns by link order with summaries one column before their subtasks. Project lets you drag boxes; ProjectFCG doesn't yet, so the layout is recomputed whenever the plan changes and two people always see the same diagram.
 
 ## Not yet implemented (Roadmap)
 
@@ -412,8 +457,9 @@ Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task I
 | ~~Agile~~ | Board, sprints, backlog, burndown, velocity (0.5); epics, issue types, sub-tasks, links, labels, filters, Jira CSV (0.6); board ↔ Gantt dependencies, sprint lifecycle, columns, WIP limits, swimlanes (0.7); releases, cumulative flow (0.8). Still open: Jira REST sync, control chart / cycle time |
 | ~~Resources~~ | Done in 0.3. Still open: work contours, overtime, time-phased cost accrual, resource pools, Team Planner, generic/budget resources, leveling that splits tasks |
 | ~~Interop~~ | MSPDI XML import/export done in 0.6; task calendars and custom fields in 0.9; print/PDF in 0.9. Still open: `.mpp` reading, splits and outline codes in XML |
-| ~~Tracking~~ | Done in 0.6; slippage bars in 0.8. Still open: physical % complete, actual work entered per assignment, time-phased actuals |
-| Later | Drawings, Network Diagram, Calendar view, Team Planner, custom field formulas and value lists, outline codes, multi-level groups, AutoFilter on column headers, split tasks, schedule-from-finish projects, a high-contrast theme, fast leveling for plans with ALAP tasks, embedded fonts in PDFs |
+| ~~Tracking~~ | Done in 0.6; slippage bars in 0.8; physical % complete in 0.10. Still open: actual work entered per assignment, time-phased actuals |
+| ~~Views~~ | Network Diagram and Calendar in 0.10. Still open: Team Planner, dragging boxes in the Network Diagram, a week/day Calendar |
+| Later | Drawings, custom field formulas and value lists, outline codes, multi-level groups, AutoFilter on column headers, split tasks, work weeks in calendars, a high-contrast theme, embedded fonts in PDFs |
 
 ## Building from source
 
@@ -481,6 +527,12 @@ Double-clicking a `.pfcg` file doesn't open it there yet; use File ▸ Open.
 * `tests/calendars.rs`: 12 tests: the same calendar for actual finish, % scheduled, assignments and Resource Usage, typed finishes on night shifts, ten-year exceptions intersected as ranges, pasting a task whose calendar was deleted, 24 Hours and Night Shift tasks, task ∩ resource calendars and ignoring resource calendars, exceptions of either calendar, names, deletes, summaries, repair, files, Project XML and undo, and the Change Working Time dialog's create / switch / delete.
 * `tests/custom_fields.rs`: 6 tests: full precision through Fill Down and Project XML, typed values and how they show, refusals, aliases, filters and groups on custom fields, files, undo, repair, and Project XML with Project's field IDs (and fields we don't hold reported).
 * `tests/core_regressions.rs`: 13 tests, one per finding of the 0.9 bug hunt.
+* `tests/safety.rs`: 5 tests: an edit that panics is undone and reported (the report never holds the plan); a frame that panics closes dialogs and the app keeps running; repeated panics go back to the last plan that drew, and give up after four; AutoRecover copies unsaved work in the background, removes it once saved, never offers a running window's copy, and the next start opens it as an unsaved plan; a normal close leaves nothing behind.
+* `tests/fuzz_stability.rs`: four seeded, bounded fuzzing campaigns: random edits with extreme values, every app command plus random clicks and keys, thousands of mutated `.pfcg`, Project XML and Jira CSV files, and calendar math. Nothing may panic, and no step may take over 20 s. Set `FUZZ_SCALE=20` for a long exploration run. `tests/fuzz_repros.rs` has one minimal test per crash the campaign found.
+* `tests/jobs.rs`: 2 tests: a large plan levels in the background with the same result as leveling in place, nothing else can change the plan meanwhile, and Cancel changes nothing.
+* `tests/project_tools.rs`: 6 tests: Sort with and without the outline, built-in sorts and back to ID; renumbering moving whole summaries with links intact; Find in any field both ways, opening collapsed summaries; Replace and Replace All (one undo step, all or nothing, Resource Names reassigning); Move Task on auto, manual, constrained, summary and started tasks; Physical % Complete in earned value, the default method, and Project XML.
+* `tests/from_finish.rs`: 4 tests: tasks hanging from the finish date with the start worked out, ASAP tasks starting with the project, negative slack when a task can't make the date, files, Project XML and undo.
+* `tests/task_views.rs`: 4 tests: Network Diagram columns following links and summaries (and surviving a loop), Calendar weeks, spans across week rows and lanes, and both views selecting a task on click and opening Task Information on double-click.
 * `tests/views.rs`: 14 tests: custom filters comparing durations, dates, money and text by type, And/Or precedence, Within, related summary rows, Date Range and Using Resource, Group By (built-in and by field, rollups, collapsing, with filters), saving, undo and validation, and the 0.8 review's findings.
 * `tests/releases.rs`: 10 tests: progress, projection and risk as stories move between sprints, what can carry a release, a milestone following its release (and the tasks linked to it), loops reported, releasing with carry-over, repairing files, Fix Version/s in Jira CSV, and the 0.8 review's findings.
 * `tests/board.rs`: 17 tests (including the sample's current sprint on every day of the week, and cumulative flow from recorded moves): starting and completing sprints (commitment, carry-over with sub-tasks, frozen velocity, reopening), editing columns (remapping, Done follows the last column); new sprints, ticket moves and ordering, done stamping, progress by points and by count, unestimated fallback, unmarking and deleting sprints, burndown, velocity and its average, assignees booking no work, file round-trip and loading 0.4 files, and the agile sample pinned to a fixed date.
@@ -512,6 +564,8 @@ src/views.rs      custom filter definitions (saved in the file)
 src/calendars.rs  base calendars for tasks
 src/custom_fields.rs  Text/Number/Flag/Date/Cost custom fields
 src/pdf.rs        a small PDF writer (vector drawing, base-14 fonts)
+src/recovery.rs   atomic writes, AutoRecover files, crash reports (no window needed)
+src/sanitize.rs   values from files into range before scheduling
 src/recurring.rs  recurring task patterns and occurrences
 src/tracking.rs   actuals, Update Project, Mark on Track, earned value
 src/jira.rs       Jira CSV import/export (CSV parser, field mapping)
@@ -523,7 +577,9 @@ src/history.rs    undo/redo
 src/io.rs         .pfcg JSON and CSV export
 src/app/          egui front end (ribbon, table, gantt, bars, timeline, inspector, dialogs,
                   resource sheet, usage views, resource dialogs, themes, system theme detection,
-                  board view, tracking and import dialogs, filters and groups, release dialogs, print)
+                  board view, tracking and import dialogs, filters and groups, release dialogs, print,
+                  safety (caught panics, AutoRecover), jobs (background leveling), sort, find/replace,
+                  move tasks, network diagram, calendar view)
 examples/xmldump.rs  writes the samples as MS Project XML (for checking with other tools)
 examples/screens.rs  renders the README screenshots (`xvfb-run cargo run --release --example screens -- docs board`)
 examples/profile.rs  profiling driver (callgrind: `cargo build --profile profiling --example profile`)

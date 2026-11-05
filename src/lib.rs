@@ -23,6 +23,7 @@ pub mod recovery;
 pub mod recurring;
 pub mod releases;
 pub mod resources;
+pub mod sanitize;
 pub mod schedule;
 pub mod tracking;
 pub mod views;

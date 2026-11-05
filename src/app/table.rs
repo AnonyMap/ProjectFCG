@@ -177,7 +177,14 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
         }
     }
 
+    let before = (app.history.generation(), app.project.tasks.len());
     body_resp.context_menu(|ui| task_context_menu(app, ui));
+    // the menu may have cut, deleted or inserted tasks: `rows` is out of
+    // date, so paint next frame instead
+    if (app.history.generation(), app.project.tasks.len()) != before {
+        ui.ctx().request_repaint();
+        return;
+    }
 
     // ---------- paint rows ----------
     let first = (app.scroll_y / row_h()).floor() as usize;

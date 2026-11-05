@@ -393,6 +393,7 @@ impl Project {
     /// Than constraint (Project's behaviour); on a manual task it simply
     /// moves the task.
     pub fn set_start(&mut self, row: usize, dt: NaiveDateTime) -> OpResult {
+        let dt = crate::calendar::clamp_datetime(dt);
         let summary = self.is_summary(row);
         let t = &mut self.tasks[row];
         match t.mode {
@@ -408,6 +409,7 @@ impl Project {
     /// Typing a finish: auto task → Finish No Earlier Than constraint;
     /// manual task → duration changes to fit.
     pub fn set_finish(&mut self, row: usize, dt: NaiveDateTime) -> OpResult {
+        let dt = crate::calendar::clamp_datetime(dt);
         if self.is_summary(row) {
             return Err("The finish of a summary task is calculated from its subtasks.".into());
         }
@@ -435,6 +437,8 @@ impl Project {
     }
 
     pub fn set_constraint(&mut self, row: usize, kind: ConstraintType, date: Option<NaiveDateTime>) -> OpResult {
+        // every date entering the plan is kept within 1900–2200 (see calendar::min_date)
+        let date = date.map(crate::calendar::clamp_datetime);
         if kind.needs_date() && date.is_none() {
             return Err(format!("{} requires a date.", kind.label()));
         }

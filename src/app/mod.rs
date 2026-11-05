@@ -2259,7 +2259,10 @@ impl ProjectFcgApp {
 
         self.last_table_rect = table_rect;
         self.last_gantt_rect = gantt_rect;
+        let before = (self.history.generation(), self.project.tasks.len());
         table::show(self, ui, table_rect, &rows);
+        // an edit in the table (its context menu) changes the rows
+        let rows = if (self.history.generation(), self.project.tasks.len()) != before { self.display_rows() } else { rows };
 
         // Splitter
         let sresp = ui.interact(split_rect, ui.scope_id().with("splitter"), egui::Sense::drag());

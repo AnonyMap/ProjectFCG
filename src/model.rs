@@ -720,8 +720,14 @@ impl Project {
 
     pub fn alloc_uid(&mut self) -> u32 {
         let u = self.next_uid;
-        self.next_uid += 1;
-        u
+        if u != u32::MAX && u != 0 {
+            self.next_uid += 1;
+            return u;
+        }
+        // out of IDs at the top (a file used the last one): the lowest one
+        // not in use
+        let used: std::collections::HashSet<u32> = self.tasks.iter().map(|t| t.uid).collect();
+        (1..u32::MAX).find(|x| !used.contains(x)).unwrap_or(u32::MAX)
     }
 
     pub fn index_of_uid(&self, uid: u32) -> Option<usize> {
@@ -885,6 +891,9 @@ pub fn parse_date(text: &str, default_time: NaiveTime) -> Result<NaiveDateTime, 
         None => (t.clone(), None),
     };
     let date = parse_date_only(&date_part).ok_or_else(err)?;
+    if date < crate::calendar::min_date() || date > crate::calendar::max_date() {
+        return Err(format!("\"{}\": dates must be between 1/1/1900 and 12/31/2200.", text.trim()));
+    }
     let time = match time_part {
         None => default_time,
         Some(tp) => parse_time(&tp).ok_or_else(err)?,

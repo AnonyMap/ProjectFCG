@@ -468,7 +468,7 @@ pub fn to_xml(p: &Project) -> String {
         }
         w.opt("Deadline", t.deadline.map(dt));
         if t.leveling_delay != 0 {
-            w.el("LevelingDelay", (t.leveling_delay * 10).to_string());
+            w.el("LevelingDelay", t.leveling_delay.saturating_mul(10).to_string());
             w.el("LevelingDelayFormat", "7");
         }
         if task_cal_uid >= 0 {
@@ -489,7 +489,7 @@ pub fn to_xml(p: &Project) -> String {
             w.el("CrossProject", "0");
             match l.lag {
                 Lag::Time { minutes, unit, elapsed } => {
-                    w.el("LinkLag", (minutes * 10).to_string());
+                    w.el("LinkLag", minutes.saturating_mul(10).to_string());
                     w.el("LagFormat", dur_format(unit, elapsed, false).to_string());
                 }
                 Lag::Percent(pct) => {
@@ -982,7 +982,7 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
             cur = c.base;
         }
         let ex: Vec<CalendarException> = chain.iter().rev().flat_map(|c| c.exceptions.iter().cloned()).collect();
-        Calendar { name: cals[&u].name.clone(), week, exceptions: ex }
+        Calendar { name: cals[&u].name.clone(), week, exceptions: ex, disjoint: false }
     };
     if let Some(u) = proj_cal {
         p.calendar = build(u);
@@ -1277,6 +1277,10 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         } else {
             format!("{lost_assignments} assignments referred to tasks or resources that aren't in the file and were left out.")
         });
+    }
+    let fixed = p.sanitize();
+    if fixed > 0 {
+        warnings.push(format!("{fixed} value(s) were out of range (dates outside 1900–2200, impossible numbers) and were brought into range."));
     }
     crate::schedule::schedule(&mut p);
     // ---- how close is our schedule to the file's? ----

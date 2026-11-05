@@ -196,6 +196,30 @@ fn calendars(app: &mut ProjectFcgApp, _ctx: &egui::Context) {
     st.week_text[5] = "8:00 AM-12:00 PM".into();
 }
 
+/// Network Diagram: the Development phase's boxes, one selected.
+fn network(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.tab = RibbonTab::View;
+    app.execute(Command::ShowView(MainView::NetworkDiagram), ctx);
+    app.network.zoom = 0.9;
+    let r = app.project.tasks.iter().position(|t| t.name.contains("Backend")).unwrap_or(5);
+    app.select_single(projectfcg::app::RowRef::Task(app.project.tasks[r].uid));
+}
+
+/// Calendar: the month the build work happens in, a task selected.
+fn calendar(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.tab = RibbonTab::View;
+    app.execute(Command::ShowView(MainView::Calendar), ctx);
+    let r = app.project.tasks.iter().position(|t| t.name.contains("Frontend")).unwrap_or(6);
+    app.select_single(projectfcg::app::RowRef::Task(app.project.tasks[r].uid));
+}
+
+/// Sort by Finish Date with the Sort dialog open over it.
+fn sort(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.tab = RibbonTab::View;
+    app.execute(Command::SortBy(projectfcg::app::sort::SortPreset::FinishDate), ctx);
+    app.execute(Command::SortDlg, ctx);
+}
+
 struct Scene {
     name: &'static str,
     agile: bool,
@@ -213,6 +237,9 @@ const SCENES: &[Scene] = &[
     Scene { name: "dark", agile: false, setup: dark },
     Scene { name: "custom", agile: false, setup: custom },
     Scene { name: "calendars", agile: false, setup: calendars },
+    Scene { name: "network", agile: false, setup: network },
+    Scene { name: "calendar-view", agile: false, setup: calendar },
+    Scene { name: "sort", agile: false, setup: sort },
 ];
 
 struct Shot {

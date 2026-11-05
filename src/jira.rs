@@ -448,6 +448,7 @@ pub fn import_csv(p: &mut Project, text: &str, opts: &ImportOptions) -> Result<I
             None if opts.create_sprints => {
                 let row = p.new_sprint();
                 p.tasks[row].name = name.clone();
+                p.sanitize();
                 crate::schedule::schedule(p);
                 rep.sprints_created.push(name.clone());
                 Some(p.tasks[row].uid)

@@ -49,11 +49,8 @@ pub fn from_json(text: &str) -> Result<Project, String> {
         ));
     }
     let mut p = env.project;
-    // Repair next_uid if a file was hand-edited.
-    let max_uid = p.tasks.iter().map(|t| t.uid).max().unwrap_or(0);
-    if p.next_uid <= max_uid {
-        p.next_uid = max_uid + 1;
-    }
+    // a hand-edited or damaged file: values into range, unique IDs
+    p.sanitize();
     p.repair_board();
     p.repair_calendars();
     p.repair_custom_fields();
