@@ -6,12 +6,19 @@ let pfcgHandle = null;   // the open project's file, when the browser can save t
 let pfcgDirty = false;
 window.addEventListener('beforeunload', (e) => { if (pfcgDirty) { e.preventDefault(); e.returnValue = ''; } });
 
-// Project's function keys and Ctrl shortcuts that browsers would take
-// (help, find, history, bookmarks…). The app still receives the key.
+// Keys the app uses that browsers would act on first: F1–F10 and F12
+// (help, reload, Go To, Save As), Ctrl+F/H/G/D… (find, history, bookmarks),
+// Ctrl+−/=/0 (the app's delete, zoom and text size, not the page's),
+// Alt+arrows/Home/End/PgUp/PgDn (the app's scrolling, not back/forward or
+// the home page). The app still receives every one of them. Never Ctrl+C/
+// V/X: the clipboard needs the browser's own copy and paste.
 window.addEventListener('keydown', (e) => {
-  const fkey = /^F([1-9]|10)$/.test(e.key) && e.key !== 'F5';
-  const ctrl = (e.ctrlKey || e.metaKey) && !e.altKey && ['f', 'h', 'g', 'd', 'k', 'l', 'u', 'j', 'e', 'b', 'i'].includes(e.key.toLowerCase());
-  if (fkey || ctrl) e.preventDefault();
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const ctrl = (e.ctrlKey || e.metaKey) && !e.altKey;
+  const fkey = /^F([1-9]|10|12)$/.test(k);
+  const ctrlKey = ctrl && ['a', 'd', 'e', 'f', 'g', 'h', 'j', 'k', 'l', 'u', 'y', '-', '=', '+', '0', '/', '>', '<', ',', '.'].includes(k);
+  const altNav = e.altKey && !e.ctrlKey && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(k);
+  if (fkey || ctrlKey || altNav) e.preventDefault();
 }, true);
 
 const PFCG_TYPES = {
