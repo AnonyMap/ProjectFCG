@@ -1,6 +1,7 @@
-# The web build (experimental): ProjectFCG compiled to WebAssembly, as a
-# folder of static files (index.html, projectfcg.js, projectfcg_bg.wasm)
-# that any web server can host. Download it from the run's artifacts.
+# The web build (experimental): ProjectFCG compiled to WebAssembly, as one
+# HTML file (ProjectFCG.html) that runs when opened from disk, no server
+# needed. index.html is the same file, for hosting. Download it from the
+# run's artifacts or the web-build branch.
 #
 # Runs on pushes to the web-spike branch, or by hand: Actions ▸ Web build
 # ▸ Run workflow.
@@ -40,14 +41,14 @@ jobs:
             cargo install --locked wasm-bindgen-cli --version "$v"
           fi
           wasm-bindgen --version
-      - name: Package
+      - name: Package (one HTML file)
         run: |
-          mkdir -p dist
-          wasm-bindgen --target web --no-typescript --out-dir dist --out-name projectfcg target/wasm32-unknown-unknown/release/projectfcg.wasm
-          cp web/index.html dist/
-          cp packaging/projectfcg.svg dist/icon.svg
-          ls -la dist dist/snippets/* || true
-          echo "wasm: $(du -h dist/projectfcg_bg.wasm | cut -f1), gzipped: $(gzip -9c dist/projectfcg_bg.wasm | wc -c | numfmt --to=iec)"
+          mkdir -p build dist
+          wasm-bindgen --target no-modules --no-typescript --out-dir build --out-name projectfcg target/wasm32-unknown-unknown/release/projectfcg.wasm
+          python3 web/bundle.py build
+          cp build/ProjectFCG.html dist/ProjectFCG.html
+          cp build/ProjectFCG.html dist/index.html
+          ls -la dist
       - uses: actions/upload-artifact@v4
         with:
           name: projectfcg-web
