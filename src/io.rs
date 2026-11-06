@@ -49,12 +49,10 @@ pub fn from_json(text: &str) -> Result<Project, String> {
         ));
     }
     let mut p = env.project;
-    // Repair next_uid if a file was hand-edited.
-    let max_uid = p.tasks.iter().map(|t| t.uid).max().unwrap_or(0);
-    if p.next_uid <= max_uid {
-        p.next_uid = max_uid + 1;
-    }
+    // a hand-edited or damaged file: values into range, unique IDs
+    p.sanitize();
     p.repair_board();
+    p.repair_risks();
     p.repair_calendars();
     p.repair_custom_fields();
     p.views.repair();
@@ -64,10 +62,9 @@ pub fn from_json(text: &str) -> Result<Project, String> {
 
 pub fn save(p: &Project, path: &Path) -> Result<(), String> {
     let json = to_json(p)?;
-    // write atomically so a crash mid-save never truncates the user's file
-    let tmp = path.with_extension("pfcg.tmp");
-    std::fs::write(&tmp, json).map_err(|e| format!("Couldn't write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("Couldn't save {}: {e}", path.display()))
+    // atomically, flushed to disk: a crash or power cut mid-save never
+    // truncates the user's file
+    crate::recovery::write_atomic(path, json.as_bytes()).map_err(|e| format!("Couldn't save {}: {e}", path.display()))
 }
 
 pub fn load(path: &Path) -> Result<Project, String> {

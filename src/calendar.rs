@@ -12,7 +12,7 @@
 //!   working minute consumed (5:00 PM, not 8:00 AM the next day).
 //! * Late finishes snap *backwards* to the end of the previous shift.
 
-use chrono::{Datelike, Duration as ChronoDur, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use serde::{Deserialize, Serialize};
 
 /// A working interval within a single day, in minutes after midnight.
@@ -28,7 +28,8 @@ impl Shift {
         Shift { start, end }
     }
     pub fn minutes(&self) -> i64 {
-        (self.end - self.start) as i64
+        // a shift ending before it starts (a damaged file) has no time
+        i64::from(self.end.saturating_sub(self.start))
     }
 }
 
@@ -49,6 +50,11 @@ pub struct Calendar {
     /// Index 0 = Monday … 6 = Sunday. Empty vec = nonworking day.
     pub week: [Vec<Shift>; 7],
     pub exceptions: Vec<CalendarException>,
+    /// The exceptions are in date order and don't overlap, so lookups can
+    /// binary-search them. Set by `intersect` (whose results can hold one
+    /// exception per day for centuries); never saved.
+    #[serde(skip)]
+    pub disjoint: bool,
 }
 
 /// How far (in days) searches for the next/previous working time may go
@@ -81,9 +87,35 @@ pub fn intersect_shifts(a: &[Shift], b: &[Shift]) -> Vec<Shift> {
 /// from overflowing the date arithmetic.
 pub const MAX_WORK: i64 = 4 * crate::duration::MAX_MINUTES;
 
+/// The dates ProjectFCG accepts, typed or from a file (Project's own range
+/// is 1984–2149). Arithmetic from inside this range never comes near
+/// chrono's limits.
+pub fn min_date() -> NaiveDate {
+    NaiveDate::from_ymd_opt(1900, 1, 1).expect("valid")
+}
+pub fn max_date() -> NaiveDate {
+    NaiveDate::from_ymd_opt(2200, 12, 31).expect("valid")
+}
+/// Clamp a date-time into the accepted range.
+pub fn clamp_datetime(dt: NaiveDateTime) -> NaiveDateTime {
+    let lo = min_date().and_hms_opt(0, 0, 0).expect("valid");
+    let hi = max_date().and_hms_opt(23, 59, 0).expect("valid");
+    dt.clamp(lo, hi)
+}
+
+/// `d + n days`, stopping at chrono's limits instead of panicking.
+pub fn plus_days(d: NaiveDate, n: i64) -> NaiveDate {
+    chrono::TimeDelta::try_days(n).and_then(|x| d.checked_add_signed(x)).unwrap_or(if n >= 0 { NaiveDate::MAX } else { NaiveDate::MIN })
+}
+
+/// `dt + n minutes`, stopping at chrono's limits instead of panicking.
+pub fn plus_minutes(dt: NaiveDateTime, n: i64) -> NaiveDateTime {
+    chrono::TimeDelta::try_minutes(n).and_then(|x| dt.checked_add_signed(x)).unwrap_or(if n >= 0 { NaiveDateTime::MAX } else { NaiveDateTime::MIN })
+}
+
 pub fn at_minute(date: NaiveDate, minute: u32) -> NaiveDateTime {
     if minute >= 1440 {
-        (date + ChronoDur::days(1)).and_hms_opt(0, 0, 0).unwrap()
+        (plus_days(date, 1)).and_hms_opt(0, 0, 0).unwrap()
     } else {
         date.and_time(NaiveTime::from_hms_opt(minute / 60, minute % 60, 0).unwrap())
     }
@@ -109,6 +141,7 @@ impl Calendar {
                 vec![],
             ],
             exceptions: vec![],
+            disjoint: false,
         }
     }
 
@@ -119,6 +152,7 @@ impl Calendar {
             name: "24 Hours".into(),
             week: std::array::from_fn(|_| day.clone()),
             exceptions: vec![],
+            disjoint: false,
         }
     }
 
@@ -141,6 +175,7 @@ impl Calendar {
                 vec![],
             ],
             exceptions: vec![],
+            disjoint: false,
         }
     }
 
@@ -179,34 +214,62 @@ impl Calendar {
             }
             let days = (b - a).num_days() + 1;
             let day = |k: i64| {
-                let d = a + chrono::Duration::days(k);
+                let d = plus_days(a, k);
                 (d, intersect_shifts(self.shifts_on(d), other.shifts_on(d)))
             };
+            // days that come out the same as the result's own week need no
+            // exception (a 24-hour exception ∩ Standard is just Standard)
+            let plain = |k: i64| {
+                let (d, s) = day(k);
+                s == week[weekday_index(d.weekday())]
+            };
             let first: Vec<Vec<Shift>> = (0..days.min(7)).map(|k| day(k).1).collect();
+            if (0..days.min(7)).all(plain) {
+                continue;
+            }
             if first.iter().all(|s| *s == first[0]) {
                 push(a, b, first[0].clone());
             } else {
                 for k in 0..days {
                     let (d, s) = day(k);
-                    push(d, d, s);
+                    if s != week[weekday_index(d.weekday())] {
+                        push(d, d, s);
+                    }
                 }
             }
         }
-        Calendar { name: format!("{} ∩ {}", self.name, other.name), week, exceptions }
+        Calendar { name: format!("{} ∩ {}", self.name, other.name), week, exceptions, disjoint: true }
     }
 
     fn in_exception(&self, date: NaiveDate) -> bool {
-        self.exceptions.iter().any(|ex| date >= ex.start && date <= ex.end)
+        self.exception_on(date).is_some()
+    }
+
+    /// The exception that sets `date`'s working time, if any.
+    fn exception_on(&self, date: NaiveDate) -> Option<&CalendarException> {
+        if self.disjoint {
+            let k = self.exceptions.partition_point(|e| e.start <= date);
+            return k.checked_sub(1).map(|k| &self.exceptions[k]).filter(|e| e.end >= date);
+        }
+        // later exceptions take precedence, matching "last one wins" editing
+        self.exceptions.iter().rev().find(|ex| date >= ex.start && date <= ex.end)
+    }
+
+    /// The exceptions that may touch `a..=b` (all of them, unless sorted).
+    fn exceptions_near(&self, a: NaiveDate, b: NaiveDate) -> &[CalendarException] {
+        if !self.disjoint {
+            return &self.exceptions;
+        }
+        let lo = self.exceptions.partition_point(|e| e.end < a);
+        let hi = self.exceptions.partition_point(|e| e.start <= b);
+        &self.exceptions[lo..hi.max(lo)]
     }
 
     pub fn shifts_on(&self, date: NaiveDate) -> &[Shift] {
-        // Later exceptions take precedence, matching "last one wins" editing.
-        for ex in self.exceptions.iter().rev() {
-            if date >= ex.start && date <= ex.end {
-                return &ex.shifts;
-            }
+        match self.exception_on(date) {
+            Some(ex) => &ex.shifts,
+            None => &self.week[weekday_index(date.weekday())],
         }
-        &self.week[weekday_index(date.weekday())]
     }
 
     pub fn is_working_day(&self, date: NaiveDate) -> bool {
@@ -226,9 +289,42 @@ impl Calendar {
         self.week[weekday_index(date.weekday())].iter().map(|s| s.minutes()).sum()
     }
 
-    /// True if any exception touches the inclusive date range.
-    fn exception_in(&self, a: NaiveDate, b: NaiveDate) -> bool {
-        self.exceptions.iter().any(|e| e.start <= b && e.end >= a)
+    /// The first day at or after `date` that an exception covers.
+    fn next_exception_start(&self, date: NaiveDate) -> Option<NaiveDate> {
+        if self.disjoint {
+            let i = self.exceptions.partition_point(|e| e.end < date);
+            return self.exceptions.get(i).map(|e| e.start.max(date));
+        }
+        self.exceptions.iter().filter(|e| e.end >= date).map(|e| e.start.max(date)).min()
+    }
+
+    /// The last day at or before `date` that an exception covers.
+    fn prev_exception_end(&self, date: NaiveDate) -> Option<NaiveDate> {
+        if self.disjoint {
+            let i = self.exceptions.partition_point(|e| e.start <= date);
+            return i.checked_sub(1).map(|i| self.exceptions[i].end.min(date));
+        }
+        self.exceptions.iter().filter(|e| e.start <= date).map(|e| e.end.min(date)).max()
+    }
+
+    /// From `date` forward: the last day of the stretch over which one
+    /// exception sets every day, and its working minutes a day. Walks can
+    /// cross a long closure or a long special-hours period in one step.
+    fn run_forward(&self, date: NaiveDate) -> Option<(NaiveDate, i64)> {
+        let e = self.exception_on(date)?;
+        // another exception starting inside the stretch may take over there
+        let next = self.exceptions_near(date, e.end).iter().filter(|f| f.start > date && f.start <= e.end).map(|f| f.start).min();
+        let last = next.map_or(e.end, |n| plus_days(n, -1));
+        Some((last, e.shifts.iter().map(|s| s.minutes()).sum::<i64>().min(1440)))
+    }
+
+    /// From `date` backward: the first day of the stretch one exception
+    /// sets, and its minutes a day.
+    fn run_backward(&self, date: NaiveDate) -> Option<(NaiveDate, i64)> {
+        let e = self.exception_on(date)?;
+        let prev = self.exceptions_near(e.start, date).iter().filter(|f| f.end < date && f.end >= e.start).map(|f| f.end).max();
+        let first = prev.map_or(e.start, |p| plus_days(p, 1));
+        Some((first, e.shifts.iter().map(|s| s.minutes()).sum::<i64>().min(1440)))
     }
 
     pub fn has_any_working_time(&self) -> bool {
@@ -250,7 +346,14 @@ impl Calendar {
                     return at_minute(date, m.max(s.start));
                 }
             }
-            date += ChronoDur::days(1);
+            if date == NaiveDate::MAX {
+                break; // the end of time: nothing further to walk
+            }
+            // a closure: past all of it at once
+            if let Some((last, 0)) = self.run_forward(date) {
+                date = last;
+            }
+            date = plus_days(date, 1);
             m = 0;
         }
         dt
@@ -266,7 +369,7 @@ impl Calendar {
         let mut m = minute_of_day(dt);
         // midnight counts as end-of-previous-day position 1440
         if m == 0 {
-            date -= ChronoDur::days(1);
+            date = plus_days(date, -(1));
             m = 1440;
         }
         for _ in 0..SEARCH_LIMIT_DAYS {
@@ -275,7 +378,10 @@ impl Calendar {
                     return at_minute(date, m.min(s.end));
                 }
             }
-            date -= ChronoDur::days(1);
+            if let Some((first, 0)) = self.run_backward(date) {
+                date = first;
+            }
+            date = plus_days(date, -(1));
             m = 1440;
         }
         dt
@@ -287,7 +393,7 @@ impl Calendar {
         let m = minute_of_day(dt);
         let date = dt.date();
         if m == 0 {
-            let prev = date - ChronoDur::days(1);
+            let prev = plus_days(date, -(1));
             return self.shifts_on(prev).iter().any(|s| s.end == 1440);
         }
         self.shifts_on(date).iter().any(|s| s.end == m)
@@ -304,12 +410,14 @@ impl Calendar {
     /// unchanged. The result is where the work ends (may be a shift end).
     pub fn add_work(&self, start: NaiveDateTime, minutes: i64) -> NaiveDateTime {
         if minutes < 0 {
-            return self.sub_work(start, -minutes);
+            // saturating: -i64::MIN would be i64::MIN again, and the two
+            // would call each other forever
+            return self.sub_work(start, minutes.saturating_neg().min(MAX_WORK));
         }
         // far past any plan, and short of where dates overflow
         let minutes = minutes.min(MAX_WORK);
         if minutes == 0 || !self.has_any_working_time() {
-            return start + ChronoDur::minutes(minutes);
+            return plus_minutes(start, minutes);
         }
         let mut remaining = minutes;
         let mut cur = self.next_working_start(start);
@@ -320,10 +428,28 @@ impl Calendar {
             // whole weeks at a time while the remainder is longer than a
             // week and no exception interrupts the pattern (exact: the
             // pattern repeats every 7 days)
-            if m == 0 && week > 0 {
-                while remaining > week && !self.exception_in(date, date + ChronoDur::days(6)) {
-                    remaining -= week;
-                    date += ChronoDur::days(7);
+            if m == 0 && week > 0 && remaining > week {
+                // all the whole weeks before the next exception, at once
+                let free = match self.next_exception_start(date) {
+                    Some(s) => (s - date).num_days().max(0),
+                    None => i64::MAX,
+                };
+                let k = ((remaining - 1) / week).min(free / 7);
+                if k > 0 {
+                    remaining -= k * week;
+                    date = plus_days(date, 7 * k);
+                }
+            }
+            // inside one exception's stretch: whole days at once, keeping
+            // the last day's work for the exact time below
+            if m == 0 {
+                if let Some((last, per)) = self.run_forward(date) {
+                    let days = (last - date).num_days();
+                    let k = if per == 0 { days } else { ((remaining - 1) / per).min(days) };
+                    if k > 0 {
+                        remaining -= k * per;
+                        date = plus_days(date, k);
+                    }
                 }
             }
             for s in self.shifts_on(date) {
@@ -337,7 +463,7 @@ impl Calendar {
                 }
                 remaining -= avail;
             }
-            cur = (date + ChronoDur::days(1)).and_hms_opt(0, 0, 0).unwrap();
+            cur = (plus_days(date, 1)).and_hms_opt(0, 0, 0).unwrap();
         }
         cur
     }
@@ -345,11 +471,11 @@ impl Calendar {
     /// Subtract `minutes` of working time from `finish` (walk backwards).
     pub fn sub_work(&self, finish: NaiveDateTime, minutes: i64) -> NaiveDateTime {
         if minutes < 0 {
-            return self.add_work(finish, -minutes);
+            return self.add_work(finish, minutes.saturating_neg().min(MAX_WORK));
         }
         let minutes = minutes.min(MAX_WORK);
         if minutes == 0 || !self.has_any_working_time() {
-            return finish - ChronoDur::minutes(minutes);
+            return plus_minutes(finish, -(minutes));
         }
         let mut remaining = minutes;
         let mut cur = self.prev_working_end(finish);
@@ -358,13 +484,27 @@ impl Calendar {
             let mut date = cur.date();
             let mut m = minute_of_day(cur);
             if m == 0 {
-                date -= ChronoDur::days(1);
+                date = plus_days(date, -(1));
                 m = 1440;
                 // whole weeks backwards (see add_work)
-                if week > 0 {
-                    while remaining > week && !self.exception_in(date - ChronoDur::days(6), date) {
-                        remaining -= week;
-                        date -= ChronoDur::days(7);
+                if week > 0 && remaining > week {
+                    let free = match self.prev_exception_end(date) {
+                        Some(e) => (date - e).num_days().max(0),
+                        None => i64::MAX,
+                    };
+                    let k = ((remaining - 1) / week).min(free / 7);
+                    if k > 0 {
+                        remaining -= k * week;
+                        date = plus_days(date, -7 * k);
+                    }
+                }
+                // whole days of one exception's stretch (see add_work)
+                if let Some((first, per)) = self.run_backward(date) {
+                    let days = (date - first).num_days();
+                    let k = if per == 0 { days } else { ((remaining - 1) / per).min(days) };
+                    if k > 0 {
+                        remaining -= k * per;
+                        date = plus_days(date, -k);
                     }
                 }
             }
@@ -419,7 +559,10 @@ impl Calendar {
                     total += (to - from) as i64;
                 }
             }
-            date += ChronoDur::days(1);
+            if date == NaiveDate::MAX {
+                break; // the end of time: nothing further to walk
+            }
+            date = plus_days(date, 1);
         }
         total
     }
@@ -429,35 +572,59 @@ impl Calendar {
     fn work_between_fast(&self, a: NaiveDateTime, b: NaiveDateTime) -> i64 {
         let d0 = a.date();
         let d9 = b.date();
-        let first_end = (d0 + ChronoDur::days(1)).and_hms_opt(0, 0, 0).unwrap();
+        let first_end = (plus_days(d0, 1)).and_hms_opt(0, 0, 0).unwrap();
         let mut total = self.work_between_days(a, first_end) + self.work_between_days(d9.and_hms_opt(0, 0, 0).unwrap(), b);
         // interior whole days d1..=d2
-        let d1 = d0 + ChronoDur::days(1);
-        let d2 = d9 - ChronoDur::days(1);
+        let d1 = plus_days(d0, 1);
+        let d2 = plus_days(d9, -(1));
         let n = (d2 - d1).num_days() + 1;
         total += (n / 7) * self.week_minutes();
-        let mut d = d1 + ChronoDur::days((n / 7) * 7);
+        let mut d = plus_days(d1, (n / 7) * 7);
         while d <= d2 {
             total += self.pattern_minutes(d);
-            d += ChronoDur::days(1);
+            if d == NaiveDate::MAX {
+                break; // the end of time: nothing further to walk
+            }
+            d = plus_days(d, 1);
         }
-        // exceptions override the pattern on the days they cover
-        let mut days: Vec<NaiveDate> = vec![];
-        for e in &self.exceptions {
-            let s = e.start.max(d1);
-            let f = e.end.min(d2);
-            let mut x = s;
-            while x <= f {
-                days.push(x);
-                x += ChronoDur::days(1);
+        // exceptions override the pattern on the days they cover: per
+        // stretch between exception boundaries (where one exception rules
+        // every day), its minutes a day less the pattern's, times the days.
+        // Linear in exceptions, not days: a century's closure is one step.
+        if d1 <= d2 {
+            let near = self.exceptions_near(d1, d2);
+            let mut cuts: Vec<NaiveDate> = vec![d1, plus_days(d2, 1)];
+            for e in near.iter().filter(|e| e.end >= d1 && e.start <= d2) {
+                cuts.push(e.start.max(d1));
+                cuts.push(plus_days(e.end.min(d2), 1));
+            }
+            cuts.sort_unstable();
+            cuts.dedup();
+            for w in cuts.windows(2) {
+                let (a, b) = (w[0], plus_days(w[1], -1));
+                if b < a {
+                    continue;
+                }
+                let Some(ex) = self.exception_on(a) else { continue };
+                let per_day = ex.shifts.iter().map(|s| s.minutes()).sum::<i64>().min(1440);
+                let days = (b - a).num_days() + 1;
+                total += days * per_day - self.pattern_between(a, b);
             }
         }
-        if !days.is_empty() {
-            days.sort_unstable();
-            days.dedup();
-            for x in days {
-                total += self.working_minutes_on(x).min(1440) - self.pattern_minutes(x);
+        total
+    }
+
+    /// The weekly pattern's minutes over the days `a..=b`.
+    fn pattern_between(&self, a: NaiveDate, b: NaiveDate) -> i64 {
+        let n = (b - a).num_days() + 1;
+        let mut total = (n / 7) * self.week_minutes();
+        let mut d = plus_days(a, (n / 7) * 7);
+        while d <= b {
+            total += self.pattern_minutes(d);
+            if d == NaiveDate::MAX {
+                break; // the end of time: nothing further to walk
             }
+            d = plus_days(d, 1);
         }
         total
     }
@@ -495,6 +662,7 @@ impl Calendar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration as ChronoDur;
 
     fn dt(y: i32, m: u32, d: u32, h: u32, mi: u32) -> NaiveDateTime {
         NaiveDate::from_ymd_opt(y, m, d)
@@ -586,6 +754,7 @@ mod tests {
             name: "none".into(),
             week: Default::default(),
             exceptions: vec![],
+            disjoint: false,
         };
         let s = dt(2026, 1, 5, 8, 0);
         assert_eq!(c.add_work(s, 60), s + ChronoDur::minutes(60));
@@ -633,6 +802,66 @@ mod tests {
                 assert_eq!(cal.work_between(s2, f), w, "sub_work {f} -{w} case {case}");
                 assert!(s2 <= f);
             }
+        }
+    }
+
+    /// The day-by-day walks (no week or exception jumps) the fast paths
+    /// must agree with, on calendars with overlapping, long, closed and
+    /// special-hours exceptions.
+    #[test]
+    fn jumps_across_exceptions_match_a_day_by_day_walk() {
+        fn naive_add(c: &Calendar, start: NaiveDateTime, minutes: i64) -> NaiveDateTime {
+            let mut remaining = minutes;
+            let mut date = start.date();
+            let mut m = minute_of_day(start);
+            loop {
+                for s in c.shifts_on(date) {
+                    if m >= s.end {
+                        continue;
+                    }
+                    let from = m.max(s.start);
+                    let avail = (s.end - from) as i64;
+                    if remaining <= avail {
+                        return at_minute(date, from + remaining as u32);
+                    }
+                    remaining -= avail;
+                }
+                date = plus_days(date, 1);
+                m = 0;
+            }
+        }
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut rnd = |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let base = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        for case in 0..300 {
+            let mut c = Calendar::standard();
+            for _ in 0..rnd(6) {
+                let s = plus_days(base, rnd(900) as i64);
+                let long = rnd(3) == 0;
+                let e = plus_days(s, rnd(if long { 2000 } else { 15 }) as i64);
+                let shifts = match rnd(3) {
+                    0 => vec![],
+                    1 => vec![Shift::new(9 * 60, 13 * 60)],
+                    _ => vec![Shift::new(6 * 60, 10 * 60), Shift::new(12 * 60, 20 * 60)],
+                };
+                c.exceptions.push(CalendarException { name: String::new(), start: s, end: e, shifts });
+            }
+            if !c.has_any_working_time() {
+                continue;
+            }
+            let start = c.next_working_start(base.and_hms_opt(8, 0, 0).unwrap() + ChronoDur::minutes(rnd(600 * 1440) as i64));
+            let mins = 1 + rnd(400 * 480) as i64;
+            let fast = c.add_work(start, mins);
+            assert_eq!(fast, naive_add(&c, start, mins), "case {case}: add_work {start} + {mins}");
+            assert_eq!(c.work_between(start, fast), mins, "case {case}: work_between agrees");
+            let back = c.sub_work(fast, mins);
+            assert_eq!(c.work_between(back, fast), mins, "case {case}: sub_work {fast} - {mins} gave {back}");
+            assert_eq!(c.next_working_start(back), c.next_working_start(start), "case {case}: back to the start");
         }
     }
 }

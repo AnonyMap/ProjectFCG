@@ -1,6 +1,7 @@
 //! The desktop application (egui/eframe).
 
 pub mod bars;
+pub mod calendar_view;
 pub mod board;
 pub mod columns;
 pub mod commands;
@@ -8,19 +9,26 @@ pub mod datepicker;
 pub mod dialogs;
 pub mod filebrowser;
 pub mod filters;
+pub mod find;
 pub mod format_dialogs;
 pub mod gantt;
 pub mod inspector;
 pub mod interchange;
+pub mod jobs;
+pub mod move_tasks;
+pub mod network;
 pub mod sprint_dialogs;
 pub mod prefs;
 pub mod print;
 pub mod release_dialogs;
 pub mod resource_dialogs;
 pub mod resource_sheet;
+pub mod risk_view;
+pub mod safety;
 pub mod usage;
 pub mod ribbon;
 pub mod sample;
+pub mod sort;
 pub mod system_theme;
 pub mod table;
 pub mod theme;
@@ -129,6 +137,8 @@ pub struct ViewOptions {
     pub related_summaries: bool,
     /// Group By headers the user collapsed (by label).
     pub collapsed_groups: std::collections::HashSet<String>,
+    /// View ▸ Sort (rows shown in this order; IDs unchanged).
+    pub sort: sort::SortSpec,
 }
 
 impl Default for ViewOptions {
@@ -147,6 +157,7 @@ impl Default for ViewOptions {
             main: MainView::Gantt,
             related_summaries: false,
             collapsed_groups: Default::default(),
+            sort: Default::default(),
         }
     }
 }
@@ -171,6 +182,9 @@ pub enum MainView {
     ResourceSheet,
     ResourceUsage,
     Board,
+    NetworkDiagram,
+    Calendar,
+    Risks,
 }
 
 impl MainView {
@@ -181,6 +195,9 @@ impl MainView {
             MainView::ResourceSheet => "Resource Sheet",
             MainView::ResourceUsage => "Resource Usage",
             MainView::Board => "Board",
+            MainView::NetworkDiagram => "Network Diagram",
+            MainView::Calendar => "Calendar",
+            MainView::Risks => "Risk Register",
         }
     }
 }
@@ -210,6 +227,8 @@ pub enum PendingAction {
     NewAgileSample,
     Open,
     OpenPath(PathBuf),
+    /// A recovery copy offered at start (index into the offers).
+    OpenRecovered(usize),
     Quit,
 }
 
@@ -286,6 +305,13 @@ pub struct ProjectFcgApp {
     pub prefs: prefs::Prefs,
     /// Where prefs are saved (None in tests).
     pub prefs_path: Option<PathBuf>,
+    /// Crash safety: caught panics, AutoRecover, crash reports.
+    pub safety: safety::Safety,
+    /// Leveling running in the background (large plans).
+    pub leveling_job: Option<jobs::LevelJob>,
+    pub network: network::NetworkState,
+    pub calendar: calendar_view::CalendarState,
+    pub risk_view: risk_view::RiskViewState,
 }
 
 impl Default for ProjectFcgApp {
@@ -361,6 +387,11 @@ impl ProjectFcgApp {
             usage: usage::UsageState::default(),
             prefs: prefs::Prefs::default(),
             prefs_path: None,
+            safety: Default::default(),
+            leveling_job: None,
+            network: Default::default(),
+            calendar: Default::default(),
+            risk_view: Default::default(),
         };
         app.scroll_gantt_to(app.project.start);
         if let Some(t) = app.project.tasks.first() {
@@ -402,25 +433,53 @@ impl ProjectFcgApp {
     }
 
     /// Run an editing operation as one undoable step. On error the project
-    /// is restored and the message shown.
+    /// is restored and the message shown. An edit that panics (a bug) is
+    /// undone the same way and reported, rather than closing the window.
     pub fn edit_project<T>(
         &mut self,
         label: &str,
         f: impl FnOnce(&mut Project) -> Result<T, String>,
     ) -> Option<T> {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        if self.leveling_job.is_some() {
+            self.error("Leveling is running. Wait for it or cancel it first.");
+            return None;
+        }
         let before = self.project.clone();
-        match f(&mut self.project) {
-            Ok(v) => {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let v = f(&mut self.project);
+            if v.is_ok() {
+                // scheduling is part of the edit: if it fails, so does the edit
+                if self.auto_calc {
+                    schedule(&mut self.project);
+                } else {
+                    refresh_structure(&mut self.project);
+                }
+            }
+            v
+        }));
+        match r {
+            Ok(Ok(v)) => {
                 if self.history.checkpoint(label, &before, &self.project) {
                     self.dirty = true;
                 }
-                self.recalc();
+                self.needs_calc = !self.auto_calc;
                 self.set_status(label);
                 Some(v)
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 self.project = before;
                 self.error(e);
+                None
+            }
+            Err(payload) => {
+                self.project = before;
+                let report = self.report_panic(&format!("the edit “{label}”"), &*payload);
+                let msg = format!("“{label}” ran into an internal error and was undone; the plan is as it was.");
+                self.error(match &report {
+                    Some(p) => format!("{msg} A report was saved to {}.", p.display()),
+                    None => msg,
+                });
                 None
             }
         }
@@ -508,7 +567,9 @@ impl ProjectFcgApp {
                     e += 1;
                 }
                 let label = filters::group_label(p, keyed[k].1, self.group, &cx);
-                let rows: Vec<usize> = keyed[k..e].iter().map(|x| x.1).collect();
+                let mut rows: Vec<usize> = keyed[k..e].iter().map(|x| x.1).collect();
+                // grouped rows have no outline: sort them flat
+                sort::sort_rows(p, &mut rows, &sort::SortSpec { keep_outline: false, ..self.view.sort.clone() });
                 let collapsed = self.view.collapsed_groups.contains(&label);
                 out.push(DisplayRow::Group(groups.len()));
                 groups.push(filters::rollup(p, label, &rows, collapsed));
@@ -545,9 +606,13 @@ impl ProjectFcgApp {
                 }
                 stack.push(i);
             }
-            out.extend(base.into_iter().filter(|&i| keep[i]).map(DisplayRow::Task));
+            let mut rows: Vec<usize> = base.into_iter().filter(|&i| keep[i]).collect();
+            sort::sort_rows(p, &mut rows, &self.view.sort);
+            out.extend(rows.into_iter().map(DisplayRow::Task));
         } else {
-            out.extend(base.into_iter().filter(|&i| eval.matches(i)).map(DisplayRow::Task));
+            let mut rows: Vec<usize> = base.into_iter().filter(|&i| eval.matches(i)).collect();
+            sort::sort_rows(p, &mut rows, &self.view.sort);
+            out.extend(rows.into_iter().map(DisplayRow::Task));
         }
         out
     }
@@ -631,6 +696,10 @@ impl ProjectFcgApp {
         fresh.prefs_path = self.prefs_path.clone();
         fresh.board.show_charts = self.board.show_charts;
         fresh.board.backlog_open = self.board.backlog_open;
+        // the window's crash safety carries over; what it knew about the
+        // old plan doesn't
+        fresh.safety = std::mem::take(&mut self.safety);
+        fresh.safety.reset_for_new_plan();
         let start = fresh.project_span().0;
         fresh.scroll_gantt_to(start);
         *self = fresh;
@@ -705,6 +774,7 @@ impl ProjectFcgApp {
             }
             PendingAction::Open => self.pick_open(),
             PendingAction::OpenPath(p) => self.open_path(p),
+            PendingAction::OpenRecovered(i) => self.open_recovered_now(i),
             PendingAction::Quit => {
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -751,6 +821,7 @@ impl ProjectFcgApp {
         let (ext, filter_name, default_name) = match purpose {
             filebrowser::Mode::ExportCsv => ("csv", "CSV", format!("{}.csv", self.project.title)),
             filebrowser::Mode::ExportJiraCsv => ("csv", "CSV", format!("{} - Jira.csv", self.project.title)),
+            filebrowser::Mode::ExportRisksCsv => ("csv", "CSV", format!("{} - Risks.csv", self.project.title)),
             filebrowser::Mode::ExportXml => ("xml", "MS Project XML", format!("{}.xml", self.project.title)),
             filebrowser::Mode::ExportPdf => ("pdf", "PDF", format!("{}.pdf", self.project.title)),
             filebrowser::Mode::ExportPng => ("png", "PNG image", format!("{} - {}.png", self.project.title, self.view.main.label())),
@@ -791,21 +862,28 @@ impl ProjectFcgApp {
         match purpose {
             filebrowser::Mode::ExportCsv => {
                 let path = if path.extension().is_none() { path.with_extension("csv") } else { path };
-                match std::fs::write(&path, crate::io::to_csv(&self.project)) {
+                match crate::recovery::write_atomic(&path, crate::io::to_csv(&self.project).as_bytes()) {
                     Ok(()) => self.set_status(format!("Exported {}", path.display())),
+                    Err(e) => self.error(format!("Couldn't export: {e}")),
+                }
+            }
+            filebrowser::Mode::ExportRisksCsv => {
+                let path = if path.extension().is_none() { path.with_extension("csv") } else { path };
+                match crate::recovery::write_atomic(&path, self.project.risks_csv().as_bytes()) {
+                    Ok(()) => self.set_status(format!("Exported {} risk(s) to {}", self.project.risks.len(), path.display())),
                     Err(e) => self.error(format!("Couldn't export: {e}")),
                 }
             }
             filebrowser::Mode::ExportJiraCsv => {
                 let path = if path.extension().is_none() { path.with_extension("csv") } else { path };
-                match std::fs::write(&path, crate::jira::export_csv(&self.project)) {
+                match crate::recovery::write_atomic(&path, crate::jira::export_csv(&self.project).as_bytes()) {
                     Ok(()) => self.set_status(format!("Exported {} tickets to {}", self.project.tickets.len(), path.display())),
                     Err(e) => self.error(format!("Couldn't export: {e}")),
                 }
             }
             filebrowser::Mode::ExportXml => {
                 let path = if path.extension().is_none() { path.with_extension("xml") } else { path };
-                match std::fs::write(&path, crate::mspdi::to_xml(&self.project)) {
+                match crate::recovery::write_atomic(&path, crate::mspdi::to_xml(&self.project).as_bytes()) {
                     Ok(()) => self.set_status(format!("Saved {} as Project XML", path.display())),
                     Err(e) => self.error(format!("Couldn't save: {e}")),
                 }
@@ -813,7 +891,7 @@ impl ProjectFcgApp {
             filebrowser::Mode::ExportPdf => {
                 let path = if path.extension().is_none() { path.with_extension("pdf") } else { path };
                 let pdf = print::print_pdf(self, &self.print_options);
-                match std::fs::write(&path, pdf) {
+                match crate::recovery::write_atomic(&path, &pdf) {
                     Ok(()) => self.set_status(format!("Saved {}", path.display())),
                     Err(e) => self.error(format!("Couldn't save the PDF: {e}")),
                 }
@@ -821,7 +899,7 @@ impl ProjectFcgApp {
             filebrowser::Mode::ExportPng => {
                 let path = if path.extension().is_none() { path.with_extension("png") } else { path };
                 if let Picture::Ready(bytes) = std::mem::take(&mut self.picture) {
-                    match std::fs::write(&path, bytes) {
+                    match crate::recovery::write_atomic(&path, &bytes) {
                         Ok(()) => self.set_status(format!("Saved the picture as {}", path.display())),
                         Err(e) => self.error(format!("Couldn't save the picture: {e}")),
                     }
@@ -844,6 +922,11 @@ impl ProjectFcgApp {
 
     pub fn execute(&mut self, cmd: Command, ctx: &egui::Context) {
         use Command::*;
+        // nothing may change the plan while a copy of it is being leveled
+        if self.leveling_job.is_some() {
+            self.set_status("Leveling is running. Wait for it or cancel it first.");
+            return;
+        }
         // In the Resource Sheet, row commands act on resources.
         if self.view.main == MainView::ResourceSheet {
             match cmd {
@@ -883,6 +966,20 @@ impl ProjectFcgApp {
                 TaskInfo => return self.execute(ResourceInfo, ctx),
                 EditCell => return self.res_begin_edit(None),
                 Copy | Cut | Paste | Indent | Outdent | MoveUp | MoveDown | LinkTasks | UnlinkTasks | FillDown | ResetField => return,
+                _ => {}
+            }
+        }
+        // In the Risk Register, edits in the details are saved before any
+        // command (so Undo undoes them), and row commands act on risks.
+        if self.view.main == MainView::Risks {
+            self.commit_risk_draft();
+            match cmd {
+                InsertTask => {
+                    self.new_risk(crate::risks::RiskKind::Threat, vec![]);
+                    return;
+                }
+                DeleteTasks | DeleteKey => return self.delete_selected_risk(),
+                Copy | Cut | Paste | Indent | Outdent | MoveUp | MoveDown | LinkTasks | UnlinkTasks | FillDown | ResetField | InsertSummary | InsertMilestone | InsertRecurring | EditCell | TaskInfo | Find | FindNext => return,
                 _ => {}
             }
         }
@@ -929,7 +1026,12 @@ impl ProjectFcgApp {
             CustomFieldsDlg => self.dialogs.custom_fields = Some(view_dialogs::CustomFieldsDlg::new(&self.project)),
             SavePdf => self.pick_save(filebrowser::Mode::ExportPdf),
             ImportJiraCsv => self.pick_open_for(filebrowser::Mode::ImportJiraCsv),
-            Options => self.dialogs.open_options(&self.project),
+            Options => {
+                self.dialogs.open_options(&self.project);
+                if let Some(o) = &mut self.dialogs.options {
+                    o.autorecover = self.prefs.autorecover_minutes;
+                }
+            }
             Quit => self.guarded(PendingAction::Quit, ctx),
 
             Undo => {
@@ -986,7 +1088,21 @@ impl ProjectFcgApp {
                     self.row_selected = true;
                 }
             }
-            Find => self.dialogs.find_open = true,
+            Find => {
+                self.dialogs.find.replace_mode = false;
+                self.dialogs.find_open = true;
+            }
+            ReplaceDlg => {
+                self.dialogs.find.replace_mode = true;
+                self.dialogs.find_open = true;
+            }
+            SortBy(pre) => {
+                self.view.sort = pre.spec();
+                self.set_status(format!("Sorted {}", pre.label()));
+            }
+            SortDlg => self.dialogs.sort = Some(sort::SortDlg::from(&self.view.sort)),
+            MoveTasks(days) => self.move_tasks(days),
+            MoveTasksDlg => self.dialogs.move_tasks = Some(Default::default()),
             FindNext => self.find_next(),
             GoTo => self.dialogs.goto_open = true,
 
@@ -1177,6 +1293,8 @@ impl ProjectFcgApp {
                 });
             }
 
+            ZoomIn if self.view.main == MainView::NetworkDiagram => self.network.zoom = (self.network.zoom * 1.25).min(2.5),
+            ZoomOut if self.view.main == MainView::NetworkDiagram => self.network.zoom = (self.network.zoom / 1.25).max(0.25),
             ZoomIn => self.zoom_to(self.gantt.ppd * 1.5, 0.5),
             ZoomOut => self.zoom_to(self.gantt.ppd / 1.5, 0.5),
             SetTimescale(t) => self.zoom_to(t.ppd(), 0.0),
@@ -1482,6 +1600,7 @@ impl ProjectFcgApp {
             }
             ShowView(v) => {
                 self.commit_edit();
+                self.commit_risk_draft();
                 self.res_commit_edit();
                 self.view.main = v;
                 if v == MainView::ResourceSheet && self.sheet.active.is_none() {
@@ -1532,15 +1651,10 @@ impl ProjectFcgApp {
             }
             LevelAll | LevelSelection => {
                 let rows = if cmd == LevelSelection { Some(self.selected_rows_sorted()) } else { None };
-                if let Some(res) = self.edit_project("Level Resources", |p| Ok(crate::leveling::level(p, rows.as_deref()))) {
-                    let mut msg = format!("Leveling delayed {} task(s).", res.delayed.len());
-                    if res.unresolved.is_empty() {
-                        self.set_status(msg);
-                    } else {
-                        msg.push_str("\n\nCould not resolve:\n• ");
-                        msg.push_str(&res.unresolved.join("\n• "));
-                        self.dialogs.message = Some(("Resource Leveling".into(), msg));
-                    }
+                if self.level_in_background() {
+                    self.start_level_job(rows);
+                } else if let Some(res) = self.edit_project("Level Resources", |p| Ok(crate::leveling::level(p, rows.as_deref()))) {
+                    self.report_leveling(&res);
                 }
             }
             ClearLeveling => {
@@ -1777,7 +1891,9 @@ impl ProjectFcgApp {
     }
 
     fn fill_down(&mut self) {
-        let rows = self.selected_rows_sorted();
+        // from the top row as shown (a sorted view isn't in ID order)
+        let sel: std::collections::HashSet<usize> = self.selected_rows_sorted().into_iter().collect();
+        let rows: Vec<usize> = self.display_rows().into_iter().filter_map(|r| if let DisplayRow::Task(i) = r { Some(i) } else { None }).filter(|i| sel.contains(i)).collect();
         let Some(col) = self.columns.get(self.active_col).map(|c| c.id) else {
             return;
         };
@@ -1791,29 +1907,6 @@ impl ProjectFcgApp {
             }
             Ok(())
         });
-    }
-
-    pub fn find_next(&mut self) {
-        let needle = self.dialogs.find_text.to_lowercase();
-        if needle.is_empty() {
-            self.dialogs.find_open = true;
-            return;
-        }
-        let n = self.project.tasks.len();
-        let start = self.active_index().map(|i| i + 1).unwrap_or(0);
-        for k in 0..n {
-            let i = (start + k) % n;
-            if self.project.tasks[i].name.to_lowercase().contains(&needle) {
-                // reveal collapsed ancestors
-                for a in self.project.ancestors_of(i) {
-                    self.project.tasks[a].collapsed = false;
-                }
-                self.select_index(i);
-                self.set_status(format!("Found \"{}\" at task {}", self.dialogs.find_text, i + 1));
-                return;
-            }
-        }
-        self.set_status(format!("\"{}\" not found", self.dialogs.find_text));
     }
 
     // ------------------------------------------------------------ editing
@@ -1975,6 +2068,7 @@ impl ProjectFcgApp {
         if let Some(a) = self.deferred_action.take() {
             self.run_pending(a, &ctx);
         }
+        self.poll_jobs(&ctx);
         // Window close: ask to save.
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.dirty {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -2156,6 +2250,9 @@ impl ProjectFcgApp {
             MainView::ResourceUsage => return usage::show(self, ui, full, usage::UsageKind::Resource),
             MainView::TaskUsage => return usage::show(self, ui, full, usage::UsageKind::Task),
             MainView::Board => return board::show(self, ui, full),
+            MainView::NetworkDiagram => return network::show(self, ui, full),
+            MainView::Calendar => return calendar_view::show(self, ui, full),
+            MainView::Risks => return risk_view::show(self, ui, full),
             MainView::Gantt => {}
         }
         let min_table = 120.0;
@@ -2196,7 +2293,10 @@ impl ProjectFcgApp {
 
         self.last_table_rect = table_rect;
         self.last_gantt_rect = gantt_rect;
+        let before = (self.history.generation(), self.project.tasks.len());
         table::show(self, ui, table_rect, &rows);
+        // an edit in the table (its context menu) changes the rows
+        let rows = if (self.history.generation(), self.project.tasks.len()) != before { self.display_rows() } else { rows };
 
         // Splitter
         let sresp = ui.interact(split_rect, ui.scope_id().with("splitter"), egui::Sense::drag());
@@ -2257,7 +2357,7 @@ impl ProjectFcgApp {
                             }
                         }
                         MainView::Board => board::key(self, *key, *modifiers),
-                        MainView::Gantt => {}
+                        MainView::Gantt | MainView::NetworkDiagram | MainView::Calendar | MainView::Risks => {}
                     }
                 }
                 egui::Event::Text(t) => {
@@ -2481,7 +2581,7 @@ impl ProjectFcgApp {
 
 impl eframe::App for ProjectFcgApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.frame(ui);
+        self.safe_frame(ui);
     }
 }
 
@@ -2513,6 +2613,9 @@ pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
                 }
                 None => ProjectFcgApp::default(),
             };
+            if let (Some(rec), Some(dir)) = (crate::recovery::Recovery::default_location(), crate::recovery::state_dir()) {
+                app.safety.enable(rec, dir);
+            }
             if let Some(path) = prefs::default_path() {
                 let loaded = prefs::load_with_migration(&path);
                 // apply the saved text size through the normal path so
@@ -2521,6 +2624,7 @@ pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
                 app.prefs.ui_zoom = loaded.ui_zoom;
                 app.prefs.theme_mode = loaded.theme_mode;
                 app.prefs.accent = loaded.accent;
+                app.prefs.autorecover_minutes = loaded.autorecover_minutes;
                 app.set_text_size(size);
                 app.prefs_path = Some(path);
             }

@@ -177,7 +177,14 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
         }
     }
 
+    let before = (app.history.generation(), app.project.tasks.len());
     body_resp.context_menu(|ui| task_context_menu(app, ui));
+    // the menu may have cut, deleted or inserted tasks: `rows` is out of
+    // date, so paint next frame instead
+    if (app.history.generation(), app.project.tasks.len()) != before {
+        ui.ctx().request_repaint();
+        return;
+    }
 
     // ---------- paint rows ----------
     let first = (app.scroll_y / row_h()).floor() as usize;
@@ -451,6 +458,21 @@ fn paint_cell(app: &ProjectFcgApp, p: &Painter, cell: Rect, i: usize, col: Colum
             if let Some(r) = &t.recurrence {
                 icon_recurring(&clip, pos2(x + 5.0, cy));
                 tips.push(format!("Recurring task: {}. Task Information edits the series.", r.describe()));
+                x += 13.0;
+            }
+            let risks = proj.risks_of_task(t.uid);
+            if !risks.is_empty() {
+                let worst = risks.iter().map(|r| proj.risk_level(r)).max().unwrap_or(crate::risks::RiskLevel::None);
+                let threat = risks.iter().any(|r| r.kind != crate::risks::RiskKind::Opportunity);
+                icon_risk(&clip, pos2(x + 5.0, cy), worst, !threat);
+                let mut tip = format!("{} open risk item(s) tied to this task (View ▸ Risk Register):", risks.len());
+                for r in risks.iter().take(8) {
+                    tip += &format!("\n{}  {} ({})", r.key(), if r.title.is_empty() { "(untitled)" } else { r.title.as_str() }, proj.risk_level(r).label(proj.risk_standard(r)));
+                }
+                if risks.len() > 8 {
+                    tip += &format!("\n… and {} more", risks.len() - 8);
+                }
+                tips.push(tip);
                 x += 13.0;
             }
             if !t.board_deps.is_empty() {
@@ -907,6 +929,10 @@ pub fn task_context_menu(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
     run(app, ui, "Manually Schedule", Command::SetManual, has_task);
     run(app, ui, "Auto Schedule", Command::SetAuto, has_task);
     ui.separator();
+    if ui.add_enabled(has_task, egui::Button::new("Add Risk for Task")).on_hover_text("A new risk in the Risk Register, tied to this task").clicked() {
+        app.add_risk_for_active_task();
+        ui.close();
+    }
     let is_sprint = app.active_index().is_some_and(|r| app.project.tasks[r].is_sprint);
     if is_sprint {
         run(app, ui, "Open on Board", Command::OpenOnBoard, true);
@@ -914,6 +940,19 @@ pub fn task_context_menu(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
     } else {
         run(app, ui, "Mark as Sprint", Command::ToggleSprint, has_task && !app.active_index().is_some_and(|r| app.project.tasks[r].calc.is_summary));
     }
+}
+
+/// A triangle with "!": risks are tied to the task, coloured by the worst
+/// level (blue when they are all opportunities).
+pub fn icon_risk(p: &Painter, c: Pos2, level: crate::risks::RiskLevel, opportunity: bool) {
+    let (mut fill, text) = super::risk_view::level_colors(level, opportunity);
+    if level == crate::risks::RiskLevel::None {
+        fill = pal().glyph;
+    }
+    let pts = vec![c + vec2(0.0, -5.5), c + vec2(5.5, 4.5), c + vec2(-5.5, 4.5)];
+    p.add(egui::Shape::convex_polygon(pts, fill, Stroke::new(0.8, pal().glyph)));
+    let tc = if level == crate::risks::RiskLevel::None { pal().bg } else { text };
+    p.text(c + vec2(0.0, 1.0), Align2::CENTER_CENTER, "!", FontId::proportional(8.5), tc);
 }
 
 /// Little board: a sprint task.

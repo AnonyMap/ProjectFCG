@@ -16,6 +16,9 @@ pub struct Prefs {
     /// View ▸ Theme.
     pub theme_mode: super::theme::ThemeMode,
     pub accent: super::theme::Accent,
+    /// File ▸ Options ▸ Save: copy unsaved work for AutoRecover every N
+    /// minutes (0: off).
+    pub autorecover_minutes: u32,
 }
 
 impl Default for Prefs {
@@ -25,6 +28,7 @@ impl Default for Prefs {
             ui_zoom: 1.0,
             theme_mode: Default::default(),
             accent: Default::default(),
+            autorecover_minutes: 5,
         }
     }
 }
@@ -77,7 +81,7 @@ impl Prefs {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| e.to_string())
+        crate::recovery::write_atomic(path, json.as_bytes()).map_err(|e| e.to_string())
     }
 
     pub fn sanitized(mut self) -> Prefs {
@@ -90,6 +94,7 @@ impl Prefs {
             self.ui_zoom = 1.0;
         }
         self.ui_zoom = self.ui_zoom.clamp(0.5, 3.0);
+        self.autorecover_minutes = self.autorecover_minutes.min(120);
         self
     }
 }
@@ -124,7 +129,7 @@ mod tests {
         let a = Prefs { text_size: 20.0, ui_zoom: 1.5, ..Default::default() };
         a.save(&oldest).unwrap();
         assert_eq!(load_with_migration(&new), a, "0.1–0.2 prefs are picked up");
-        let b = Prefs { text_size: 18.0, ui_zoom: 1.0, theme_mode: ThemeMode::Dark, accent: Accent::Green };
+        let b = Prefs { text_size: 18.0, ui_zoom: 1.0, theme_mode: ThemeMode::Dark, accent: Accent::Green, autorecover_minutes: 5 };
         b.save(&older).unwrap();
         assert_eq!(load_with_migration(&new), b, "0.3 prefs win over 0.1–0.2");
         let c = Prefs { text_size: 16.0, ..Default::default() };

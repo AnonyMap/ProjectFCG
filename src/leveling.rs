@@ -349,7 +349,23 @@ fn refresh(prep: &crate::schedule::Prepared, p: &mut Project, fw: &mut crate::sc
 
 /// Level the project (rows = None) or only the given rows.
 pub fn level(p: &mut Project, rows: Option<&[usize]>) -> LevelResult {
-    level_impl(p, rows, false)
+    level_impl(p, rows, false, None).unwrap_or_default()
+}
+
+/// Progress and cancellation for leveling run in the background.
+#[derive(Default)]
+pub struct Control {
+    pub cancel: std::sync::atomic::AtomicBool,
+    /// Candidates placed so far in this pass, and how many there are.
+    pub done: std::sync::atomic::AtomicUsize,
+    pub total: std::sync::atomic::AtomicUsize,
+    pub pass: std::sync::atomic::AtomicUsize,
+}
+
+/// `level`, reporting progress and stopping early (None) when cancelled.
+/// When cancelled, `p` is half-leveled: run it on a copy.
+pub fn level_controlled(p: &mut Project, rows: Option<&[usize]>, ctl: &Control) -> Option<LevelResult> {
+    level_impl(p, rows, false, Some(ctl))
 }
 
 /// Reference version that reschedules after every delay instead of only
@@ -357,17 +373,18 @@ pub fn level(p: &mut Project, rows: Option<&[usize]>) -> LevelResult {
 /// tests check the two agree.
 #[doc(hidden)]
 pub fn level_exhaustive(p: &mut Project, rows: Option<&[usize]>) -> LevelResult {
-    level_impl(p, rows, true)
+    level_impl(p, rows, true, None).unwrap_or_default()
 }
 
-fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> LevelResult {
+fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool, ctl: Option<&Control>) -> Option<LevelResult> {
+    use std::sync::atomic::Ordering::Relaxed;
     clear_leveling(p, rows);
     let selected: Option<HashSet<u32>> = rows.map(|r| r.iter().filter_map(|&i| p.tasks.get(i).map(|t| t.uid)).collect());
     let mut result = LevelResult::default();
     let mut delayed: HashSet<u32> = HashSet::new();
 
-    for _pass in 0..6 {
-        schedule(p);
+    for pass in 0..6 {
+        crate::schedule::schedule_fixed_start(p);
         // structure, links and spans don't change while leveling, only delays
         let prep = crate::schedule::prepare(p);
         let n = p.tasks.len();
@@ -384,6 +401,11 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
             is_cand[c] = true;
         }
         let order = precedence_order(p, &infl, &is_cand);
+        if let Some(c) = ctl {
+            c.pass.store(pass, Relaxed);
+            c.total.store(order.len(), Relaxed);
+            c.done.store(0, Relaxed);
+        }
         // tasks whose bookings count: everything except candidates not yet placed
         let mut processed = vec![false; n];
         let booked_rows = |processed: &[bool], is_cand: &[bool]| -> Vec<usize> { (0..n).filter(|&i| !is_cand[i] || processed[i]).collect() };
@@ -398,23 +420,34 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
         let mut seen = vec![(0u32, 0u32); n];
         let mut gen = 0u32;
         let mut rebook_rows: Vec<usize> = vec![];
-        let has_asg: Vec<bool> = {
-            let mut v = vec![false; n];
+        // each row's resources (any assignment)
+        let res_of: Vec<Vec<u32>> = {
+            let mut v = vec![vec![]; n];
             for a in &p.assignments {
                 if let Some(&i) = idx.get(&a.task) {
-                    v[i] = true;
+                    v[i].push(a.resource);
                 }
             }
             v
         };
+        let has_asg: Vec<bool> = res_of.iter().map(|r| !r.is_empty()).collect();
         let mut moved = vec![false; n];
         let mut rolled = vec![false; n];
-        let mut stale = false; // a booked task may have moved since `book` was built
+        // resources with a booking that may have moved since `book` was
+        // built: a candidate only reads its own resources' bookings, so only
+        // those make a reschedule necessary
+        let mut stale: HashSet<u32> = HashSet::new();
         let mut dirty = false; // some delay hasn't been scheduled yet
         let mut changed = false;
         let mut touched: Vec<usize> = vec![];
 
         for t in order {
+            if let Some(c) = ctl {
+                if c.cancel.load(Relaxed) {
+                    return None;
+                }
+                c.done.fetch_add(1, Relaxed);
+            }
             if let Some(fw) = fw.as_mut() {
                 refresh(&prep, p, fw, &mut lstale, t);
                 for r in std::mem::take(&mut rebook_rows) {
@@ -424,17 +457,18 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
                     }
                 }
             }
-            let needs_fresh = !lazy && dirty && (always_fresh || p.settings.level_within_slack || moved[t] || rolled[t] || stale);
+            let reads_stale = !stale.is_empty() && res_of[t].iter().any(|r| stale.contains(r));
+            let needs_fresh = !lazy && dirty && (always_fresh || p.settings.level_within_slack || moved[t] || rolled[t] || reads_stale);
             if needs_fresh {
                 if always_fresh || p.settings.level_within_slack {
-                    schedule(p); // slack is needed (and the reference recomputes everything)
+                    crate::schedule::schedule_fixed_start(p); // slack is needed (and the reference recomputes everything)
                 } else {
                     crate::schedule::reschedule_dates(p, &prep);
                 }
                 book = bookings_from_calc(p, booked_rows(&processed, &is_cand).into_iter(), &idx);
                 moved.iter_mut().for_each(|m| *m = false);
                 rolled.iter_mut().for_each(|m| *m = false);
-                stale = false;
+                stale.clear();
                 dirty = false;
             }
             let my: Vec<(usize, u32, f64, i64, usize)> = p
@@ -515,14 +549,14 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
                         // what this delay can move
                         touched.clear();
                         infl.spread(t, &mut moved, &mut rolled, &mut touched);
-                        if touched.iter().any(|&r| r != t && (!is_cand[r] || processed[r]) && !p.assignments_of_task(r).is_empty()) {
-                            stale = true;
+                        for &r in touched.iter().filter(|&&r| r != t && (!is_cand[r] || processed[r])) {
+                            stale.extend(res_of[r].iter().copied());
                         }
                         // the scheduler may not move these by the full delay
                         // (ALAP sits on its late dates; No Later Than caps it),
                         // so the booking recorded below would be a guess
                         if matches!(p.tasks[t].constraint, ConstraintType::ALAP | ConstraintType::SNLT | ConstraintType::FNLT) {
-                            stale = true;
+                            stale.extend(my.iter().map(|m| m.1));
                         }
                     }
                 }
@@ -552,7 +586,7 @@ fn level_impl(p: &mut Project, rows: Option<&[usize]>, always_fresh: bool) -> Le
             }
         }
     }
-    result
+    Some(result)
 }
 
 /// Record a placed task's bookings (as the scheduler will place them).

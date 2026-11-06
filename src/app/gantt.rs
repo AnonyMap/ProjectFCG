@@ -761,7 +761,12 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect, rows: &[Disp
             }
         }
     }
+    let before = (app.history.generation(), app.project.tasks.len());
     resp.context_menu(|ui| super::table::task_context_menu(app, ui));
+    if (app.history.generation(), app.project.tasks.len()) != before {
+        ui.ctx().request_repaint();
+        return;
+    }
 
     // ---------- header (timescale) ----------
     let hp = painter.with_clip_rect(header);
@@ -1108,7 +1113,7 @@ fn drag_result(app: &ProjectFcgApp, drag: &BarDrag, xf: &Xform) -> (NaiveDateTim
             let f = if t.calc.is_summary {
                 s + (drag.orig_finish - drag.orig_start)
             } else if t.duration.elapsed {
-                s + ChronoDur::minutes(t.duration.minutes)
+                crate::calendar::plus_minutes(s, t.duration.minutes)
             } else {
                 cal.add_work(s, t.duration.minutes)
             };

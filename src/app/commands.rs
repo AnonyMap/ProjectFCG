@@ -263,6 +263,14 @@ pub enum Command {
     AddResource(crate::model::ResourceType),
     ResourceInfo,
     LevelAll,
+    /// View ▸ Sort ▸ by Start Date, …
+    SortBy(super::sort::SortPreset),
+    SortDlg,
+    /// Task ▸ Move: by `days` working days (negative: back).
+    MoveTasks(i32),
+    MoveTasksDlg,
+    /// Find (Ctrl+F) and Replace (Ctrl+H).
+    ReplaceDlg,
     LevelSelection,
     ClearLeveling,
     LevelingOptions,
@@ -322,6 +330,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Command> {
         (true, false, true, Key::Space) => SelectAll,
         (false, false, true, Key::Space) => SelectRow,
         (true, false, false, Key::F) => Find,
+        (true, false, false, Key::H) => ReplaceDlg,
         (false, false, true, Key::F5) => Find,
         (false, false, true, Key::F4) => FindNext,
         (false, false, false, Key::F5) => GoTo,
@@ -421,6 +430,7 @@ pub const SHORTCUT_HELP: &[(&str, &str)] = &[
     ("Ctrl+Shift+F5", "Scroll to task"),
     ("F5", "Go To"),
     ("Ctrl+F / Shift+F5", "Find"),
+    ("Ctrl+H", "Replace"),
     ("Shift+F4", "Find next"),
     ("F9", "Calculate project"),
     ("Ctrl+F9", "Toggle automatic calculation"),

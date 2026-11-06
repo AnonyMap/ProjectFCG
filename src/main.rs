@@ -49,6 +49,8 @@ fn main() {
             _ => {}
         }
     }
+    // crash reports say where a panic happened (see app::safety)
+    projectfcg::recovery::install_panic_hook();
     if let Err(e) = projectfcg::app::run(open, sample) {
         eprintln!("projectfcg: failed to start the window: {e}");
         eprintln!("If no display is available, try `projectfcg --self-test` to verify the scheduler.");

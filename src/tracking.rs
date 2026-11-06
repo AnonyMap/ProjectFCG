@@ -113,6 +113,7 @@ impl Project {
 
     /// Actual Start (None = NA: the task is no longer started).
     pub fn set_actual_start(&mut self, row: usize, at: Option<NaiveDateTime>) -> OpResult {
+        let at = at.map(crate::calendar::clamp_datetime);
         if self.is_summary(row) {
             return Err("Enter actuals on subtasks; summaries roll them up.".into());
         }
@@ -136,6 +137,7 @@ impl Project {
     /// Actual Finish: the task is 100% done, and its duration becomes the
     /// working time between actual start and finish.
     pub fn set_actual_finish(&mut self, row: usize, at: Option<NaiveDateTime>) -> OpResult {
+        let at = at.map(crate::calendar::clamp_datetime);
         if self.is_summary(row) {
             return Err("Enter actuals on subtasks; summaries roll them up.".into());
         }
@@ -239,6 +241,8 @@ impl Project {
     /// `reschedule_after`, unstarted tasks scheduled before that date get a
     /// Start No Earlier Than it (what Project does for them).
     pub fn update_project(&mut self, through: NaiveDateTime, mode: UpdateMode, rows: Option<&[usize]>, reschedule_after: Option<NaiveDateTime>) -> Vec<usize> {
+        let through = crate::calendar::clamp_datetime(through);
+        let reschedule_after = reschedule_after.map(crate::calendar::clamp_datetime);
         let targets: Vec<usize> = match rows {
             Some(r) => r.iter().copied().filter(|&i| i < self.tasks.len()).collect(),
             None => (0..self.tasks.len()).collect(),
@@ -275,6 +279,7 @@ impl Project {
     /// auto-scheduled tasks (all, or `rows`) that would start earlier get a
     /// Start No Earlier Than `after`.
     pub fn reschedule_uncompleted(&mut self, after: NaiveDateTime, rows: Option<&[usize]>) -> Vec<usize> {
+        let after = crate::calendar::clamp_datetime(after);
         let targets: Vec<usize> = match rows {
             Some(r) => r.iter().copied().filter(|&i| i < self.tasks.len()).collect(),
             None => (0..self.tasks.len()).collect(),
@@ -399,7 +404,11 @@ pub(crate) fn compute_tracking(p: &mut Project, acost: &[f64], parents: &[Option
                 }
             };
             bcws[i] = b.cost * share;
-            bcwp[i] = b.cost * t.percent_complete / 100.0;
+            let done = match t.ev_method {
+                crate::model::EvMethod::PercentComplete => t.percent_complete,
+                crate::model::EvMethod::PhysicalPercentComplete => t.physical_percent,
+            };
+            bcwp[i] = b.cost * done.clamp(0.0, 100.0) / 100.0;
         }
     }
     // summaries' own fixed cost accrues with their rolled-up progress (and

@@ -316,9 +316,9 @@ pub fn to_xml(p: &Project) -> String {
     if !p.manager.is_empty() {
         w.el("Manager", &p.manager);
     }
-    w.el("ScheduleFromStart", "1");
+    w.el("ScheduleFromStart", if p.finish_date.is_some() { "0" } else { "1" });
     w.el("StartDate", dt(p.start));
-    w.opt("FinishDate", p.calc.finish.map(dt));
+    w.opt("FinishDate", p.finish_date.or(p.calc.finish).map(dt));
     // whole days in MSPDI; rounded rather than truncated
     w.el("CriticalSlackLimit", ((s.critical_slack_threshold as f64 / s.durations.minutes_per_day.max(1) as f64).round() as i64).to_string());
     w.el("CurrencySymbol", &s.currency_symbol);
@@ -343,6 +343,7 @@ pub fn to_xml(p: &Project) -> String {
     w.el("AutoAddNewResourcesAndTasks", b(s.auto_add_resources));
     w.opt("StatusDate", p.status_date.map(dt));
     w.el("NewTasksAreManual", b(!s.new_tasks_auto));
+    w.el("DefaultTaskEVMethod", if s.default_ev_method == crate::model::EvMethod::PhysicalPercentComplete { "1" } else { "0" });
 
     // ---- custom fields in use, with their names ----
     let custom_in_use = p.custom_fields_in_use();
@@ -467,7 +468,7 @@ pub fn to_xml(p: &Project) -> String {
         }
         w.opt("Deadline", t.deadline.map(dt));
         if t.leveling_delay != 0 {
-            w.el("LevelingDelay", (t.leveling_delay * 10).to_string());
+            w.el("LevelingDelay", t.leveling_delay.saturating_mul(10).to_string());
             w.el("LevelingDelayFormat", "7");
         }
         if task_cal_uid >= 0 {
@@ -476,6 +477,10 @@ pub fn to_xml(p: &Project) -> String {
         if !t.notes.is_empty() {
             w.el("Notes", &t.notes);
         }
+        if t.physical_percent != 0.0 {
+            w.el("PhysicalPercentComplete", (t.physical_percent.round() as i64).to_string());
+        }
+        w.el("EarnedValueMethod", if t.ev_method == crate::model::EvMethod::PhysicalPercentComplete { "1" } else { "0" });
         let extra: Vec<Link> = board_links.get(&i).map(|v| v.iter().map(|(u, lag)| Link { pred: *u, kind: LinkType::FS, lag: *lag }).collect()).unwrap_or_default();
         for l in t.predecessors.iter().chain(extra.iter()) {
             w.open("PredecessorLink");
@@ -484,7 +489,7 @@ pub fn to_xml(p: &Project) -> String {
             w.el("CrossProject", "0");
             match l.lag {
                 Lag::Time { minutes, unit, elapsed } => {
-                    w.el("LinkLag", (minutes * 10).to_string());
+                    w.el("LinkLag", minutes.saturating_mul(10).to_string());
                     w.el("LagFormat", dur_format(unit, elapsed, false).to_string());
                 }
                 Lag::Percent(pct) => {
@@ -908,6 +913,9 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         if let Some(v) = flag(root, "NewTasksAreManual") {
             s.new_tasks_auto = !v;
         }
+        if int(root, "DefaultTaskEVMethod") == Some(1) {
+            s.default_ev_method = crate::model::EvMethod::PhysicalPercentComplete;
+        }
         if let Some(v) = flag(root, "AutoAddNewResourcesAndTasks") {
             s.auto_add_resources = v;
         }
@@ -919,7 +927,10 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         }
     }
     if flag(root, "ScheduleFromStart") == Some(false) {
-        warnings.push("The project was scheduled from its finish date; ProjectFCG schedules forward from the start date.".into());
+        match date_time(root, "FinishDate") {
+            Some(f) => p.finish_date = Some(f),
+            None => warnings.push("The project is scheduled from its finish date, but the file gives no finish date; it's scheduled from its start instead.".into()),
+        }
     }
 
     // ---- custom field names (task fields we know; others are reported) ----
@@ -971,7 +982,7 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
             cur = c.base;
         }
         let ex: Vec<CalendarException> = chain.iter().rev().flat_map(|c| c.exceptions.iter().cloned()).collect();
-        Calendar { name: cals[&u].name.clone(), week, exceptions: ex }
+        Calendar { name: cals[&u].name.clone(), week, exceptions: ex, disjoint: false }
     };
     if let Some(u) = proj_cal {
         p.calendar = build(u);
@@ -1035,6 +1046,10 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
             }
             t.deadline = date_time(tn, "Deadline");
             t.notes = text(tn, "Notes").unwrap_or("").replace("\r\n", "\n");
+            t.physical_percent = float(tn, "PhysicalPercentComplete").filter(|v| v.is_finite()).unwrap_or(0.0).clamp(0.0, 100.0);
+            if int(tn, "EarnedValueMethod") == Some(1) {
+                t.ev_method = crate::model::EvMethod::PhysicalPercentComplete;
+            }
             if let Some(ld) = int(tn, "LevelingDelay").filter(|v| *v != 0) {
                 let (_, el, _, _) = parse_dur_format(int(tn, "LevelingDelayFormat").unwrap_or(8).clamp(0, 100) as u32);
                 let m = (ld / 10).clamp(0, MAX_MINUTES);
@@ -1262,6 +1277,10 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         } else {
             format!("{lost_assignments} assignments referred to tasks or resources that aren't in the file and were left out.")
         });
+    }
+    let fixed = p.sanitize();
+    if fixed > 0 {
+        warnings.push(format!("{fixed} value(s) were out of range (dates outside 1900–2200, impossible numbers) and were brought into range."));
     }
     crate::schedule::schedule(&mut p);
     // ---- how close is our schedule to the file's? ----

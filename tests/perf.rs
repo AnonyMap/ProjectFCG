@@ -108,3 +108,33 @@ fn views_probe() {
     app.execute(Command::SetGroup(GroupBy::Field(ColumnId::Start)), &ctx);
     frames(&mut app, &ctx, 30, "5000 tasks: group by start week");
 }
+
+#[test]
+#[ignore]
+fn more_probe() {
+    use projectfcg::app::commands::Command;
+    let shape = Shape { tasks: 5000, resources: 80, ..Default::default() };
+    let p = random_project(7, &shape);
+    let xml = time("5000: to_xml", || projectfcg::mspdi::to_xml(&p));
+    time("5000: from_xml (incl. schedule)", || projectfcg::mspdi::from_xml(&xml).unwrap());
+    let ctx = egui::Context::default();
+    let mut app = ProjectFcgApp::new(p.clone());
+    time("5000: print_pdf", || projectfcg::app::print::print_pdf(&app, &Default::default()).len());
+    time("5000: clone project", || app.project.clone());
+    time("5000: edit name (clone, schedule, diff)", || {
+        app.edit_project("n", |p| {
+            p.tasks[10].name = "x".into();
+            Ok(())
+        })
+    });
+    time("5000: undo", || app.execute(Command::Undo, &ctx));
+    time("5000: redo", || app.execute(Command::Redo, &ctx));
+    time("5000: schedule", || projectfcg::schedule::schedule(&mut app.project));
+    time("5000: inactive_mask", || app.project.inactive_mask());
+    app.view.main = MainView::Board;
+    frames(&mut app, &ctx, 20, "5000: Board");
+    app.view.main = MainView::Gantt;
+    app.select_single(projectfcg::app::RowRef::Task(app.project.tasks[2500].uid));
+    app.execute(Command::SelectAll, &ctx);
+    frames(&mut app, &ctx, 20, "5000: Gantt, all selected");
+}

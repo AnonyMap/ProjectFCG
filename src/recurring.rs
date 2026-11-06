@@ -132,11 +132,11 @@ pub fn occurrence_dates(r: &Recurrence, cal: &crate::calendar::Calendar) -> Vec<
         RecurPattern::Weekly => {
             let days: Vec<usize> = (0..7).filter(|&i| r.weekdays[i]).collect();
             let days = if days.is_empty() { vec![r.start.weekday().num_days_from_monday() as usize] } else { days };
-            let monday = r.start - chrono::Duration::days(r.start.weekday().num_days_from_monday() as i64);
+            let monday = crate::calendar::plus_days(r.start, -(r.start.weekday().num_days_from_monday() as i64));
             'weeks: for w in 0..5_000u32 {
-                let wk = monday + chrono::Duration::weeks((w * every) as i64);
+                let wk = crate::calendar::plus_days(monday, 7 * i64::from(w) * i64::from(every));
                 for &dd in &days {
-                    let d = wk + chrono::Duration::days(dd as i64);
+                    let d = crate::calendar::plus_days(wk, dd as i64);
                     if d < r.start {
                         continue;
                     }
@@ -147,10 +147,10 @@ pub fn occurrence_dates(r: &Recurrence, cal: &crate::calendar::Calendar) -> Vec<
             }
         }
         RecurPattern::Monthly | RecurPattern::Yearly => {
-            let step = if r.pattern == RecurPattern::Monthly { every } else { every * 12 };
+            let step = if r.pattern == RecurPattern::Monthly { every } else { every.saturating_mul(12) };
             let day = r.start.day();
             for k in 0..2_000u32 {
-                let Some(first) = r.start.with_day(1).and_then(|f| f.checked_add_months(Months::new(k * step))) else { break };
+                let Some(first) = r.start.with_day(1).and_then(|f| f.checked_add_months(Months::new(k.saturating_mul(step)))) else { break };
                 // the 31st in a 30-day month is the month's last day, as in Project
                 let last = first.checked_add_months(Months::new(1)).and_then(|n| n.pred_opt()).map(|d| d.day()).unwrap_or(28);
                 let Some(d) = first.with_day(day.min(last)) else { break };
@@ -204,6 +204,10 @@ impl Project {
     fn series_days(&self, r: &Recurrence) -> OpResult<Vec<NaiveDate>> {
         if r.duration.minutes <= 0 {
             return Err("Each occurrence needs a duration.".into());
+        }
+        let in_range = |d: NaiveDate| d >= crate::calendar::min_date() && d <= crate::calendar::max_date();
+        if !in_range(r.start) || matches!(r.end, RecurEnd::By(e) if !in_range(e)) {
+            return Err("A recurring task's dates must be between 1900 and 2200.".into());
         }
         let mut days: Vec<NaiveDate> = vec![];
         for d in occurrence_dates(r, &self.calendar) {

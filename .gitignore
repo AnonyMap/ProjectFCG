@@ -3,3 +3,4 @@
 *.pfcg.tmp
 *.AppImage
 *.zsync
+.claude/

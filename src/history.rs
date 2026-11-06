@@ -81,6 +81,8 @@ pub fn same_task(a: &Task, b: &Task) -> bool {
         calendar,
         ignore_resource_calendars,
         custom,
+        physical_percent,
+        ev_method,
         calc: _,
     } = a;
     *uid == b.uid
@@ -116,6 +118,8 @@ pub fn same_task(a: &Task, b: &Task) -> bool {
         && *calendar == b.calendar
         && *ignore_resource_calendars == b.ignore_resource_calendars
         && *custom == b.custom
+        && physical_percent.to_bits() == b.physical_percent.to_bits()
+        && *ev_method == b.ev_method
 }
 
 /// Same for everything in a project that isn't a task (or computed).
@@ -140,6 +144,9 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         views,
         calendars,
         custom_aliases,
+        finish_date,
+        risks,
+        risk_settings,
         calc: _,
     } = a;
     *title == b.title
@@ -158,6 +165,9 @@ fn same_rest(a: &Project, b: &Project) -> bool {
         && *views == b.views
         && *calendars == b.calendars
         && *custom_aliases == b.custom_aliases
+        && *finish_date == b.finish_date
+        && *risks == b.risks
+        && *risk_settings == b.risk_settings
 }
 
 fn rest_of(p: &Project) -> Box<Project> {
@@ -181,6 +191,9 @@ fn rest_of(p: &Project) -> Box<Project> {
         views: p.views.clone(),
         calendars: p.calendars.clone(),
         custom_aliases: p.custom_aliases.clone(),
+        finish_date: p.finish_date,
+        risks: p.risks.clone(),
+        risk_settings: p.risk_settings.clone(),
         calc: Default::default(),
     })
 }
@@ -261,11 +274,14 @@ pub struct History {
     undo: Vec<(String, Delta)>,
     redo: Vec<(String, Delta)>,
     pub limit: usize,
+    /// Bumped by every change the history sees (edits, undo, redo,
+    /// clear): AutoRecover saves when it moves.
+    generation: u64,
 }
 
 impl Default for History {
     fn default() -> Self {
-        History { undo: vec![], redo: vec![], limit: 100 }
+        History { undo: vec![], redo: vec![], limit: 100, generation: 0 }
     }
 }
 
@@ -283,7 +299,12 @@ impl History {
             self.undo.remove(0);
         }
         self.redo.clear();
+        self.generation += 1;
         true
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Drop the most recent checkpoint (used when an edit turns out to be a
@@ -296,6 +317,7 @@ impl History {
         let (label, d) = self.undo.pop()?;
         let inv = apply(current, d);
         self.redo.push((label.clone(), inv));
+        self.generation += 1;
         Some(label)
     }
 
@@ -303,6 +325,7 @@ impl History {
         let (label, d) = self.redo.pop()?;
         let inv = apply(current, d);
         self.undo.push((label.clone(), inv));
+        self.generation += 1;
         Some(label)
     }
 
@@ -321,6 +344,7 @@ impl History {
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.generation += 1;
     }
     /// Approximate memory held by the history (bytes).
     pub fn approx_bytes(&self) -> usize {

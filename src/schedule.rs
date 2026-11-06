@@ -20,7 +20,7 @@
 use crate::calendar::Calendar;
 use crate::duration::Lag;
 use crate::model::{ConstraintType, Link, LinkType, Project, StartDriver, TaskMode, TaskStatus};
-use chrono::{Duration as ChronoDur, NaiveDateTime};
+use chrono::NaiveDateTime;
 use std::collections::VecDeque;
 
 /// Outline structure derived from outline levels.
@@ -358,13 +358,13 @@ impl Ctx<'_> {
         if lag_mins == 0 {
             dt
         } else if elapsed {
-            dt + ChronoDur::minutes(lag_mins)
+            crate::calendar::plus_minutes(dt, lag_mins)
         } else {
             self.cal.add_work(dt, lag_mins)
         }
     }
     fn unshift(&self, dt: NaiveDateTime, lag_mins: i64, elapsed: bool) -> NaiveDateTime {
-        self.shift(dt, -lag_mins, elapsed)
+        self.shift(dt, lag_mins.saturating_neg(), elapsed)
     }
 }
 
@@ -455,7 +455,7 @@ impl SpanSet {
     }
     fn finish(&self, t: usize, s: NaiveDateTime) -> NaiveDateTime {
         if self.elapsed[t] {
-            return s + ChronoDur::minutes(self.mins[t]);
+            return crate::calendar::plus_minutes(s, self.mins[t]);
         }
         self.parts[t]
             .iter()
@@ -465,7 +465,7 @@ impl SpanSet {
     }
     fn start(&self, t: usize, f: NaiveDateTime) -> NaiveDateTime {
         if self.elapsed[t] {
-            return f - ChronoDur::minutes(self.mins[t]);
+            return crate::calendar::plus_minutes(f, self.mins[t].saturating_neg());
         }
         self.parts[t]
             .iter()
@@ -482,11 +482,14 @@ impl SpanSet {
 }
 
 fn lag_minutes(lag: &Lag, pred_duration: i64) -> (i64, bool) {
+    // a lag (or a % of a long predecessor) never reaches past a century:
+    // dates stay where calendar arithmetic is quick and exact
+    let cap = crate::duration::MAX_MINUTES;
     match lag {
         Lag::Time {
             minutes, elapsed, ..
-        } => (*minutes, *elapsed),
-        Lag::Percent(pct) => (((pred_duration as f64) * pct / 100.0).round() as i64, false),
+        } => ((*minutes).clamp(-cap, cap), *elapsed),
+        Lag::Percent(pct) => (((pred_duration as f64) * pct / 100.0).round().clamp(-cap as f64, cap as f64) as i64, false),
     }
 }
 
@@ -516,6 +519,35 @@ pub(crate) fn prepare(p: &mut Project) -> Prepared {
 /// Run the scheduler, filling every task's `calc` and the project's `calc`.
 pub fn schedule(p: &mut Project) {
     // sprint progress comes from the Kanban board
+    p.apply_sprint_progress();
+    let prep = prepare(p);
+    match p.finish_date {
+        None => run(p, &prep, true),
+        Some(fin) => {
+            // Scheduled from the finish: late dates come back from the
+            // finish date, and the project starts at the earliest late
+            // start. Late dates hardly ever depend on the start, so this
+            // settles on the second pass; the cap guards odd calendars.
+            for k in 0..4 {
+                run(p, &prep, true);
+                let s = (0..p.tasks.len())
+                    .filter(|&i| !prep.st.is_summary[i] && !prep.st.inactive[i] && p.tasks[i].mode == TaskMode::Auto)
+                    .filter_map(|i| p.tasks[i].calc.late_start)
+                    .min()
+                    .unwrap_or_else(|| prep.cal.sub_work(fin, 0));
+                if s == p.start || k == 3 {
+                    break;
+                }
+                p.start = s;
+            }
+        }
+    }
+}
+
+/// `schedule` without working out the start of a plan scheduled from its
+/// finish: leveling keeps the start where it was while it places tasks
+/// (its cheap reschedules can't move it), and works it out once at the end.
+pub(crate) fn schedule_fixed_start(p: &mut Project) {
     p.apply_sprint_progress();
     let prep = prepare(p);
     run(p, &prep, true);
@@ -567,11 +599,14 @@ fn run(p: &mut Project, prep: &Prepared, full: bool) {
 
     // inactive tasks don't set the project finish (unless nothing is active)
     let any_active = (0..n).any(|i| !st.is_summary[i] && !st.inactive[i]);
-    let project_finish = (0..n)
+    let early_finish = (0..n)
         .filter(|&i| !st.is_summary[i] && (!any_active || !st.inactive[i]))
         .filter_map(|i| ef[i])
         .max()
         .unwrap_or(p.start);
+    // scheduled from the finish date: everything hangs from it (tasks that
+    // can't make it show negative slack)
+    let project_finish = p.finish_date.unwrap_or(early_finish);
 
     // ---------------- backward pass (+ ALAP placement) ----------------
     let mut ls: Vec<Option<NaiveDateTime>> = vec![None; n];
@@ -689,7 +724,7 @@ fn run(p: &mut Project, prep: &Prepared, full: bool) {
                 c.start_driver = driver[i];
             }
         }
-        p.calc.finish = Some(project_finish);
+        p.calc.finish = Some(early_finish.max(project_finish));
         crate::resources::update_assignment_dates(p);
         return;
     }
@@ -833,7 +868,7 @@ fn run(p: &mut Project, prep: &Prepared, full: bool) {
         c.board_notes = g.board_notes[i].clone();
         p.tasks[i].calc = c;
     }
-    p.calc.finish = Some(project_finish);
+    p.calc.finish = Some(early_finish.max(project_finish));
     p.calc.errors = g.errors.clone();
     p.calc.errors.extend(sp.warnings.iter().cloned());
     crate::resources::compute_resources(p);
@@ -1149,7 +1184,7 @@ pub fn refresh_structure(p: &mut Project) {
                 TaskMode::Auto => cal.next_working_start(pstart),
             };
             let f = if t.duration.elapsed {
-                s + ChronoDur::minutes(t.duration.minutes)
+                crate::calendar::plus_minutes(s, t.duration.minutes)
             } else {
                 cal.add_work(s, t.duration.minutes)
             };

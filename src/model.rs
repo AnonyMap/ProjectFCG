@@ -295,8 +295,35 @@ pub struct Task {
     /// Custom field values ("Text1" → value); unset fields aren't stored.
     #[serde(default)]
     pub custom: std::collections::BTreeMap<String, crate::custom_fields::CustomValue>,
+    /// Physical % Complete: progress judged by the work done, not the time
+    /// spent (used for earned value when `ev_method` says so).
+    #[serde(default)]
+    pub physical_percent: f64,
+    /// Task Information ▸ Advanced ▸ Earned value method.
+    #[serde(default)]
+    pub ev_method: EvMethod,
     #[serde(skip)]
     pub calc: Computed,
+}
+
+/// How a task's earned value (BCWP) is measured.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EvMethod {
+    /// Baseline cost × % Complete.
+    #[default]
+    PercentComplete,
+    /// Baseline cost × Physical % Complete.
+    PhysicalPercentComplete,
+}
+
+impl EvMethod {
+    pub const ALL: [EvMethod; 2] = [EvMethod::PercentComplete, EvMethod::PhysicalPercentComplete];
+    pub fn label(self) -> &'static str {
+        match self {
+            EvMethod::PercentComplete => "% Complete",
+            EvMethod::PhysicalPercentComplete => "Physical % Complete",
+        }
+    }
 }
 
 fn default_priority() -> u32 {
@@ -505,6 +532,8 @@ impl Task {
             calendar: None,
             ignore_resource_calendars: false,
             custom: Default::default(),
+            physical_percent: 0.0,
+            ev_method: EvMethod::PercentComplete,
             calc: Computed::default(),
         }
     }
@@ -553,6 +582,8 @@ pub struct Settings {
     pub currency_symbol: String,
     pub leveling_order: LevelingOrder,
     pub level_within_slack: bool,
+    /// Options ▸ Advanced ▸ Default task earned value method.
+    pub default_ev_method: EvMethod,
 }
 
 impl Default for Settings {
@@ -572,6 +603,7 @@ impl Default for Settings {
             currency_symbol: "$".into(),
             leveling_order: LevelingOrder::Standard,
             level_within_slack: false,
+            default_ev_method: EvMethod::PercentComplete,
         }
     }
 }
@@ -615,6 +647,16 @@ pub struct Project {
     /// Custom field renames (Project ▸ Custom Fields): "Text1" → "Team".
     #[serde(default)]
     pub custom_aliases: std::collections::BTreeMap<String, String>,
+    /// Project Information ▸ Schedule from: Project Finish Date. When set,
+    /// the plan is scheduled back from this date and `start` is computed
+    /// (the earliest late start).
+    #[serde(default)]
+    pub finish_date: Option<NaiveDateTime>,
+    /// The risk register (risks, opportunities, issues).
+    #[serde(default)]
+    pub risks: Vec<crate::risks::Risk>,
+    #[serde(default)]
+    pub risk_settings: crate::risks::RiskSettings,
     #[serde(skip)]
     pub calc: ProjectCalc,
 }
@@ -676,14 +718,23 @@ impl Project {
             views: Default::default(),
             calendars: vec![],
             custom_aliases: Default::default(),
+            finish_date: None,
+            risks: vec![],
+            risk_settings: Default::default(),
             calc: ProjectCalc::default(),
         }
     }
 
     pub fn alloc_uid(&mut self) -> u32 {
         let u = self.next_uid;
-        self.next_uid += 1;
-        u
+        if u != u32::MAX && u != 0 {
+            self.next_uid += 1;
+            return u;
+        }
+        // out of IDs at the top (a file used the last one): the lowest one
+        // not in use
+        let used: std::collections::HashSet<u32> = self.tasks.iter().map(|t| t.uid).collect();
+        (1..u32::MAX).find(|x| !used.contains(x)).unwrap_or(u32::MAX)
     }
 
     pub fn index_of_uid(&self, uid: u32) -> Option<usize> {
@@ -847,6 +898,9 @@ pub fn parse_date(text: &str, default_time: NaiveTime) -> Result<NaiveDateTime, 
         None => (t.clone(), None),
     };
     let date = parse_date_only(&date_part).ok_or_else(err)?;
+    if date < crate::calendar::min_date() || date > crate::calendar::max_date() {
+        return Err(format!("\"{}\": dates must be between 1/1/1900 and 12/31/2200.", text.trim()));
+    }
     let time = match time_part {
         None => default_time,
         Some(tp) => parse_time(&tp).ok_or_else(err)?,

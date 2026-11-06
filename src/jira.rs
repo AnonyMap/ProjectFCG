@@ -620,6 +620,10 @@ pub fn import_csv(p: &mut Project, text: &str, opts: &ImportOptions) -> Result<I
     if missing_links > 0 {
         rep.warnings.push(if missing_links == 1 { "1 link pointed at an issue that isn't in the file and was skipped.".to_string() } else { format!("{missing_links} links pointed at issues that aren't in the file and were skipped.") });
     }
+    // dates and numbers from the file into range, like any file opened
+    if p.sanitize() > 0 {
+        rep.warnings.push("Some dates or numbers were out of range (dates outside 1900–2200) and were brought into range.".into());
+    }
     Ok(rep)
 }
 

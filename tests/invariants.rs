@@ -355,3 +355,24 @@ fn fast_leveler_matches_reference_with_board_deps_and_inactive_tasks() {
     }
     assert!(bad.is_empty(), "lazy != exhaustive for {bad:?}");
 }
+
+/// 0.10 review: in a plan scheduled from its finish date, the fast
+/// leveler must still equal the reference (the start used to be
+/// re-derived by one and not the other mid-leveling).
+#[test]
+fn fast_leveling_matches_reference_scheduled_from_finish() {
+    for seed in 5000..5040u64 {
+        let mut p = random_project(seed, &shape(seed));
+        let fin = p.calc.finish.unwrap_or(p.start) + chrono::Duration::days(30);
+        p.finish_date = Some(fin);
+        schedule(&mut p);
+        let mut q = p.clone();
+        let a = projectfcg::leveling::level(&mut p, None);
+        let b = projectfcg::leveling::level_exhaustive(&mut q, None);
+        let da: Vec<i64> = p.tasks.iter().map(|t| t.leveling_delay).collect();
+        let db: Vec<i64> = q.tasks.iter().map(|t| t.leveling_delay).collect();
+        assert_eq!(da, db, "seed {seed}: leveling delays differ");
+        assert_eq!(a, b, "seed {seed}: results differ");
+        assert_eq!(p.start, q.start, "seed {seed}: starts differ");
+    }
+}
