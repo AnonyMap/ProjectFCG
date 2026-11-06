@@ -8,7 +8,7 @@ use crate::leveling::{Control, LevelResult};
 use crate::model::Project;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 /// Plans at least this big level in the background.
 pub const BACKGROUND_TASKS: usize = 1500;

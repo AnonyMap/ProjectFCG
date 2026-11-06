@@ -10,8 +10,10 @@
 // No console window behind the app on Windows (release builds).
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn self_test() -> i32 {
     let p = projectfcg::app::sample::software_release();
     let ok = p.calc.errors.is_empty() && p.tasks.iter().all(|t| t.calc.start.is_some());
@@ -29,6 +31,7 @@ fn self_test() -> i32 {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let mut open: Option<PathBuf> = None;
     let mut sample: Option<bool> = None;
@@ -56,4 +59,10 @@ fn main() {
         eprintln!("If no display is available, try `projectfcg --self-test` to verify the scheduler.");
         std::process::exit(1);
     }
+}
+
+/// The web build: the app starts on the page's canvas (web/index.html).
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    projectfcg::app::web::start();
 }

@@ -19,10 +19,14 @@ pub struct JiraImportDlg {
 
 impl ProjectFcgApp {
     pub fn start_jira_import(&mut self, path: PathBuf) {
-        let bytes = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(e) => return self.error(format!("Couldn't open {}: {e}", path.display())),
-        };
+        match std::fs::read(&path) {
+            Ok(b) => self.start_jira_import_bytes(b, &path.display().to_string()),
+            Err(e) => self.error(format!("Couldn't open {}: {e}", path.display())),
+        }
+    }
+
+    /// The Jira import dialog for a CSV's contents (`name` for messages).
+    pub fn start_jira_import_bytes(&mut self, bytes: Vec<u8>, name: &str) {
         // Jira writes UTF-8; Excel round-trips may leave Windows-1252
         let text = match String::from_utf8(bytes) {
             Ok(t) => t,
@@ -52,20 +56,24 @@ impl ProjectFcgApp {
                 }
             }
         }
-        self.dialogs.jira_import = Some(JiraImportDlg { path, text, issues: body.len(), epics, sprints, create_sprints: true, create_people: false });
+        self.dialogs.jira_import = Some(JiraImportDlg { path: PathBuf::from(name), text, issues: body.len(), epics, sprints, create_sprints: true, create_people: false });
     }
 
     pub fn open_xml(&mut self, path: PathBuf) {
-        let text = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(e) => return self.error(format!("Couldn't open {}: {e}", path.display())),
-        };
-        match crate::mspdi::from_xml(&text) {
+        match std::fs::read_to_string(&path) {
+            Ok(t) => self.open_xml_text(&t, &path.display().to_string()),
+            Err(e) => self.error(format!("Couldn't open {}: {e}", path.display())),
+        }
+    }
+
+    /// Import Project XML text (`name` for messages).
+    pub fn open_xml_text(&mut self, text: &str, name: &str) {
+        match crate::mspdi::from_xml(text) {
             Ok((p, warnings)) => {
                 // an imported file isn't a .pfcg: Save asks for a name
                 self.replace_project(p, None);
                 self.dirty = true;
-                self.set_status(format!("Imported {}", path.display()));
+                self.set_status(format!("Imported {name}"));
                 if !warnings.is_empty() {
                     let list: String = warnings.iter().map(|w| format!("• {w}\n")).collect();
                     self.dialogs.message = Some(("Imported from Project XML".into(), format!("The project was imported. Some things didn't carry over exactly:\n\n{list}")));
