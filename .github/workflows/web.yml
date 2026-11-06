@@ -12,6 +12,9 @@ on:
     branches: [web-spike]
   workflow_dispatch:
 
+permissions:
+  contents: write # push the built site to the web-build branch
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -49,3 +52,12 @@ jobs:
         with:
           name: projectfcg-web
           path: dist
+      # the built site on its own branch too (git reaches places artifact
+      # downloads don't); serve it with any static server to try it
+      - name: Push to the web-build branch
+        run: |
+          cd dist
+          git init -q -b web-build
+          git add -A
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -qm "Web build of ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" web-build
