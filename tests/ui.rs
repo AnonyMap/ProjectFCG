@@ -189,6 +189,31 @@ fn type_duration_and_navigate_with_arrows() {
     assert!(!p.tasks[0].duration.estimated);
 }
 
+/// Tab out of a cell, then type: the next cell starts editing (Excel and
+/// Project). egui moves keyboard focus on Tab; the table must not lose the
+/// typing to whatever widget got it.
+#[test]
+fn tab_out_of_a_cell_then_type_edits_the_next_cell() {
+    let mut h = H::blank();
+    h.text("D");
+    h.text("esign");
+    h.key(Key::Tab, NONE);
+    h.text("4");
+    h.text("d");
+    h.key(Key::Enter, NONE);
+    assert_eq!(h.app.columns[h.app.active_col].id, ColumnId::Duration);
+    assert_eq!(h.names(), vec!["Design"]);
+    assert_eq!(h.app.project.tasks[0].duration.minutes, 4 * 480, "the duration typed after Tab");
+    // and again from Duration to Start… back with Shift+Tab
+    h.key(Key::ArrowUp, NONE);
+    h.text("2");
+    h.key(Key::Tab, shift());
+    assert_eq!(h.app.columns[h.app.active_col].id, ColumnId::Name);
+    h.type_and_enter("Plan");
+    assert_eq!(h.names(), vec!["Plan"]);
+    assert_eq!(h.app.project.tasks[0].duration.minutes, 2 * 480);
+}
+
 #[test]
 fn invalid_duration_shows_message_and_keeps_value() {
     let mut h = three_tasks();

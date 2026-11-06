@@ -79,6 +79,9 @@ pub struct CellEdit {
     pub focus_requested: bool,
     pub select_all: bool,
     pub picker_open: bool,
+    /// Tab (Some(shift)) was pressed while editing: where to go once the
+    /// edit is saved, which can be a frame later.
+    pub tab: Option<bool>,
 }
 
 /// Copy Picture: the screenshot is asked for, arrives a frame later, and
@@ -284,6 +287,9 @@ pub struct ProjectFcgApp {
     pub pending: Option<PendingAction>,
     /// Action to run at the start of next frame (e.g. quit after Save As).
     pub deferred_action: Option<PendingAction>,
+    /// Tab ended a cell edit: take keyboard focus back from the widget egui
+    /// gave it to (see table.rs).
+    pub reclaim_focus: bool,
     pub splitter_drag: bool,
     pub use_portal: bool,
     /// Rows area height from last frame (for page up/down and scrolling).
@@ -378,6 +384,7 @@ impl ProjectFcgApp {
             file_browser: None,
             pending: None,
             deferred_action: None,
+            reclaim_focus: false,
             splitter_drag: false,
             use_portal: std::env::var_os("PROJECTFCG_NO_PORTAL").is_none(),
             rows_view_h: 400.0,
@@ -2017,6 +2024,7 @@ impl ProjectFcgApp {
             focus_requested: false,
             select_all,
             picker_open: false,
+            tab: None,
         });
     }
 
@@ -2167,6 +2175,13 @@ impl ProjectFcgApp {
         #[cfg(target_arch = "wasm32")]
         self.web_read_dropped(&ctx);
 
+        if std::mem::take(&mut self.reclaim_focus) {
+            ctx.memory_mut(|m| {
+                if let Some(f) = m.focused() {
+                    m.surrender_focus(f);
+                }
+            });
+        }
         self.handle_keyboard(&ctx);
         self.update_title(&ctx);
         // Copy Picture: the screenshot asked for last frame

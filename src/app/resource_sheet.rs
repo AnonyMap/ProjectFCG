@@ -188,6 +188,9 @@ pub struct ResEdit {
     pub focus_requested: bool,
     pub select_all: bool,
     pub picker_open: bool,
+    /// Tab (Some(shift)) was pressed while editing: where to go once the
+    /// edit is saved, which can be a frame later.
+    pub tab: Option<bool>,
 }
 
 pub struct SheetState {
@@ -264,6 +267,7 @@ impl ProjectFcgApp {
             focus_requested: false,
             select_all,
             picker_open: false,
+            tab: None,
         });
     }
 
@@ -577,12 +581,16 @@ fn show_editor(app: &mut ProjectFcgApp, ui: &mut egui::Ui, cell: Rect, e: &ResEd
             });
         }
     }
+    let shift_now = ui.input(|i| i.modifiers.shift);
+    let mut tab_dir = ui.input(|i| i.key_pressed(egui::Key::Tab)).then_some(shift_now);
     if let Some(s) = app.sheet.edit.as_mut() {
         s.text = text;
         s.focus_requested = true;
         s.picker_open = picker_open;
+        s.tab = tab_dir.or(s.tab);
+        tab_dir = s.tab;
     }
-    let (enter, tab, esc, shift, up, down) = ui.input(|i| {
+    let (enter, _tab, esc, shift, up, down) = ui.input(|i| {
         (
             i.key_pressed(egui::Key::Enter),
             i.key_pressed(egui::Key::Tab),
@@ -614,8 +622,11 @@ fn show_editor(app: &mut ProjectFcgApp, ui: &mut egui::Ui, cell: Rect, e: &ResEd
     if resp.lost_focus() && !over_picker && app.res_commit_edit() {
         if enter {
             app.res_move(if shift { -1 } else { 1 }, 0);
-        } else if tab {
-            app.res_move(0, if shift { -1 } else { 1 });
+        } else if let Some(back) = tab_dir {
+            app.res_move(0, if back { -1 } else { 1 });
         }
+    }
+    if resp.lost_focus() && tab_dir.is_some() {
+        app.reclaim_focus = true;
     }
 }
