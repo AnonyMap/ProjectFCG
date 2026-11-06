@@ -214,6 +214,66 @@ fn tab_out_of_a_cell_then_type_edits_the_next_cell() {
     assert_eq!(h.app.project.tasks[0].duration.minutes, 2 * 480);
 }
 
+/// The same with the Assign Resources window open beside the table (it
+/// stays open while you work, as in Project).
+#[test]
+fn typing_in_cells_with_assign_resources_open() {
+    let mut h = H::blank();
+    h.text("D");
+    h.text("esign");
+    h.key(Key::Enter, NONE);
+    h.key(Key::ArrowUp, NONE);
+    h.key(Key::F10, Modifiers { alt: true, ..NONE });
+    assert!(h.app.dialogs.assign.is_some(), "Assign Resources open");
+    h.key(Key::Insert, NONE);
+    h.text("N");
+    h.text("ew");
+    h.key(Key::Tab, NONE);
+    h.text("3");
+    h.text("d");
+    h.key(Key::Enter, NONE);
+    assert_eq!(h.names(), vec!["New", "Design"]);
+    assert_eq!(h.app.project.tasks[0].duration.minutes, 3 * 480);
+    assert!(h.app.edit.is_none(), "the edit was saved and closed");
+}
+
+/// Fast typing: the first character, the rest and Enter (or Tab) in one
+/// frame. The keys after the first character belong to the new editor,
+/// not to the table: Enter saves the value, it doesn't just move.
+#[test]
+fn a_value_and_enter_typed_within_one_frame_is_saved() {
+    let mut h = H::blank();
+    let down = |k| Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: NONE };
+    h.frame(vec![Event::Text("D".into()), Event::Text("esign".into()), down(Key::Tab)]);
+    h.frame(vec![]);
+    assert_eq!(h.names(), vec!["Design"]);
+    assert!(h.app.edit.is_none());
+    assert_eq!(h.app.columns[h.app.active_col].id, ColumnId::Duration, "Tab moved on");
+    h.frame(vec![Event::Text("3".into()), Event::Text("d".into()), down(Key::Enter)]);
+    h.frame(vec![]);
+    assert!(h.app.edit.is_none(), "saved and closed");
+    assert_eq!(h.app.project.tasks[0].duration.minutes, 3 * 480);
+    assert_eq!(h.app.active_row, RowRef::Blank, "then moved down");
+    // Escape in the same frame cancels
+    h.key(Key::ArrowUp, NONE);
+    h.frame(vec![Event::Text("9".into()), down(Key::Escape)]);
+    h.frame(vec![]);
+    assert!(h.app.edit.is_none());
+    assert_eq!(h.app.project.tasks[0].duration.minutes, 3 * 480, "cancelled");
+}
+
+/// Tab in the table (not editing) moves between cells; typing then edits
+/// the cell it moved to (egui also moves its own focus on Tab).
+#[test]
+fn tab_between_cells_then_type() {
+    let mut h = three_tasks();
+    h.key(Key::ArrowUp, ctrl());
+    h.key(Key::Tab, NONE);
+    assert_eq!(h.app.columns[h.app.active_col].id, ColumnId::Duration);
+    h.type_and_enter("6d");
+    assert_eq!(h.app.project.tasks[0].duration.minutes, 6 * 480);
+}
+
 #[test]
 fn invalid_duration_shows_message_and_keeps_value() {
     let mut h = three_tasks();

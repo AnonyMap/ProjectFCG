@@ -2432,6 +2432,22 @@ impl ProjectFcgApp {
         for ev in events {
             match ev {
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                    // a cell editor opened by a character typed earlier in
+                    // this frame: Enter/Tab/Esc are its, not the sheet's
+                    if self.view.main == MainView::ResourceSheet && self.sheet.edit.is_some() {
+                        let back = if modifiers.shift { -1 } else { 1 };
+                        match key {
+                            egui::Key::Enter if self.res_commit_edit() => self.res_move(back, 0),
+                            egui::Key::Tab if self.res_commit_edit() => self.res_move(0, back),
+                            egui::Key::Escape => self.sheet.edit = None,
+                            _ => {}
+                        }
+                        self.reclaim_focus |= *key == egui::Key::Tab;
+                        continue;
+                    }
+                    if self.view.main == MainView::ResourceSheet {
+                        self.reclaim_focus |= *key == egui::Key::Tab;
+                    }
                     if let Some(cmd) = commands::shortcut(*key, *modifiers) {
                         self.execute(cmd, ctx);
                         continue;
@@ -2508,6 +2524,23 @@ impl ProjectFcgApp {
                     modifiers,
                     ..
                 } => {
+                    // A character typed earlier in this frame opened a cell
+                    // editor (fast typing, or a slow frame): the keys after
+                    // it are the editor's, so Enter saves the value instead
+                    // of only moving, as it would once the editor has focus.
+                    if self.edit.is_some() {
+                        let back = if modifiers.shift { -1 } else { 1 };
+                        match key {
+                            egui::Key::Enter if self.commit_edit() => self.move_active(back, 0, false),
+                            egui::Key::Tab if self.commit_edit() => self.move_active(0, back, false),
+                            egui::Key::Escape => self.cancel_edit(),
+                            _ => {}
+                        }
+                        self.reclaim_focus |= key == egui::Key::Tab;
+                        continue;
+                    }
+                    // Tab moves between cells here, not between egui's widgets
+                    self.reclaim_focus |= key == egui::Key::Tab;
                     if let Some(cmd) = commands::shortcut(key, modifiers) {
                         self.execute(cmd, ctx);
                         continue;
