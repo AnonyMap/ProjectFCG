@@ -1,621 +1,253 @@
 # ProjectFCG
 
-A Gantt-chart project scheduler for Linux, written in Rust, whose scheduling
-engine follows Microsoft Project's rules. Version 0.10.0 covers **core
-scheduling** (0.1), **Gantt formatting, critical path analysis, baselines and
-adjustable text size** (0.2), **resources, assignments, costs and leveling**
-(0.3), **themes with dark mode** plus a performance pass (0.4), a
-**Kanban board with sprints, a backlog, burndown and velocity** (0.5), and
-**tracking with earned value, Jira-style epics and issue links, Jira CSV and
-Microsoft Project XML import/export** (0.6), and **dependencies between the
-board and the schedule, Jira's sprint lifecycle, swimlanes and WIP limits,
-recurring and inactive tasks** (0.7), and **Group By and custom filters,
-releases tied to the schedule, cumulative flow, slippage bars and Copy
-Picture** (0.8), and **printing to PDF, task calendars, custom fields and
-updates through Gear Lever** (0.9), and **crash safety with AutoRecover, the
-Network Diagram and Calendar views, Sort, Find and Replace, Move Task,
-scheduling from the finish date and a risk register with DoD and PMI rating
-and a risk matrix** (0.10).
+A desktop project scheduler for Linux, Windows and macOS whose scheduling engine follows Microsoft Project's rules. It also has a Jira-style board for teams that plan in sprints, and a risk register. It is free, open source (MIT) and saves to an open JSON format.
 
-*FCG* = Fast, Cheap, Good: pick two.
-
-> **Renamed:** this app was *Gantry* (0.1–0.2) and *Ganttry* (0.3). It still
-> opens `.gantry` and `.ganttry` files, and the first time it runs it picks up
-> your preferences from `~/.config/ganttry/` or `~/.config/gantry/`. Project
-> files are now saved as `.pfcg`, in a format older versions refuse to open.
-> If you integrated an older AppImage with Gear Lever, remove that entry and
-> add the new one.
+*FCG* stands for Fast, Cheap, Good: pick two.
 
 ![ProjectFCG: Detail Gantt with Task Path (driving predecessors in orange) and the Task Inspector](docs/screenshot.png)
 
+> **About how it was made:** ProjectFCG was written with AI. The code is open, so you can read, test and audit it yourself. See [Built with AI](#built-with-ai) below.
+
+## Install
+
+Download the latest file for your system from the [Releases page](https://github.com/AnonyMap/ProjectFCG/releases).
+
+**Linux (AppImage)**
+
+- *With Gear Lever* (preinstalled on Bazzite): open the downloaded `ProjectFCG-…-linux-x86_64.AppImage` in Gear Lever. This adds ProjectFCG to the app menu, and *Check for updates* finds new versions by itself.
+- *Without Gear Lever:*
+  ```sh
+  chmod +x ProjectFCG-*-linux-x86_64.AppImage
+  ./ProjectFCG-*-linux-x86_64.AppImage
+  ```
+- **Requirements:** any distribution from 2022 or later (glibc 2.35+). It runs natively on Wayland and X11 and uses your system's graphics drivers. It doesn't need `libfuse2`; if FUSE isn't available, add `--appimage-extract-and-run`.
+
+**Windows**
+
+- Run `ProjectFCG-…-windows-x86_64.exe`. It's a single file with nothing to install.
+- The file isn't code-signed, so SmartScreen will warn you. Choose **More info ▸ Run anyway**.
+
+**macOS**
+
+- Open `ProjectFCG-…-macos-universal.dmg` and drag the app to Applications. It runs on Apple Silicon and Intel, macOS 11 or later.
+- It isn't notarized, so the first time you open it, go to **System Settings ▸ Privacy & Security ▸ Open Anyway**.
+
+**From source**
+
+```sh
+cargo run --release -- --sample
+```
+
+You need Rust. Building, testing and packaging are covered in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+**Command-line options**
+
+| Option | What it does |
+|---|---|
+| `ProjectFCG plan.pfcg` | Open a plan |
+| `ProjectFCG plan.xml` | Import a Microsoft Project XML file |
+| `--sample` | Open a sample software-release schedule |
+| `--sample-agile` | Open a sample with sprints, tickets and a backlog |
+| `--self-test` | Check the scheduling engine without a window |
+
+**Where it keeps things**
+
+| What | Linux | Windows | macOS |
+|---|---|---|---|
+| Preferences | `~/.config/projectfcg/` | `%APPDATA%\ProjectFCG` | `~/Library/Application Support/ProjectFCG` |
+| AutoRecover copies and crash reports | `~/.local/state/projectfcg/` | `%LOCALAPPDATA%\ProjectFCG` | `~/Library/Application Support/ProjectFCG` |
+
+On macOS, read Ctrl as Cmd throughout this README.
+
+> **Older versions:** the app was once called *Gantry* and then *Ganttry*. It still opens `.gantry` and `.ganttry` files and picks up their preferences.
+
+## What it does
+
+You describe the work: the tasks, how long each takes, what depends on what, and who does it. ProjectFCG works out the dates. It finds the critical path (the chain of tasks that sets the finish date), shows where people are overbooked, and keeps the plan up to date as work is reported against it.
+
+It's built for people who know Microsoft Project, or who need its kind of plan, but don't have Project, use Linux, or want their plans in an open format. Plans travel to and from Project as Microsoft Project XML.
+
+Its two additions to Project are:
+
+- **A board for agile teams.** Sprints are bars on the Gantt chart, and the stories inside them live on a Kanban board. Schedule tasks can wait on stories, and stories can wait on tasks.
+- **A risk register** that can follow the DoD or PMI rating rules, with a risk matrix.
+
+## Features
+
+### Scheduling (the engine follows Microsoft Project's rules)
+
+- **Durations:** minutes to months, elapsed time (`3ed`) and estimates (`1 day?`).
+- **Dependencies:** finish-to-start, start-to-start, finish-to-finish and start-to-finish, with lead, lag or a percentage lag (`3FS+50%`).
+- **Constraints and deadlines:** Start No Earlier Than, Must Finish On and the others, plus deadlines.
+- **Schedule from the start or from the finish:** start from a start date, or from a finish date that the plan works backward from.
+- **Task modes:** auto-scheduled tasks are placed by the engine, and manually scheduled tasks are pinned where you put them.
+- **Special tasks:** summary tasks, milestones, recurring tasks, and inactive tasks for what-if planning.
+- **Working-time calendars:** for the project, for each resource and for individual tasks (24 Hours, Night Shift or your own), with holidays and exceptions.
+- **Analysis:** critical path (one or several), total and free slack, negative slack when a date can't be met.
+- **Explanations:** the **Task Inspector** says why a task starts when it does. *Task Path* highlights what drives the selected task.
+
+### Views
+
+- **Gantt Chart, Tracking Gantt, Detail Gantt and Leveling Gantt**, with a Timeline above them.
+- **Network Diagram** and **Calendar**.
+- **Resource Sheet, Resource Usage and Task Usage**, with hours per day, week or month.
+- **Board** (sprints, backlog, burndown, velocity, cumulative flow) and **Risk Register**.
+- **Tables:** Entry, Schedule, Tracking, Cost, Work, Earned Value and Variance, plus more than 20 insertable columns and custom fields (Text, Number, Flag, Date and Cost).
+- **Built-in and custom filters, Group By, Sort, highlights, Find and Replace.**
+- **Formatting:** bar styles, text styles, gridlines, timescales and Gantt chart styles, saved with the plan.
+- **Themes:** six colour themes, light and dark mode (following the desktop), and adjustable text size and zoom.
+
+### Resources and cost
+
+- **Resource types:** work (people), material and cost resources, with rates, cost per use and maximum units.
+- **Assigning:** type `Ana, Ben[50%]` in the Resource Names column, or use the Assign Resources window.
+- **Work = Duration × Units,** with Project's three task types (Fixed Units, Fixed Duration, Fixed Work) and effort-driven scheduling.
+- **Overallocation and leveling:** overallocations show in red. **Leveling** delays tasks until nobody is overbooked; big plans level in the background, with Cancel.
+- **Costs** from rates, quantities and fixed costs, rolled up to the project total.
+
+### Tracking
+
+- **Baselines:** 0–10, with slippage lines and progress lines.
+- **Progress:** % complete, actual and remaining duration, and actual dates, with *Update Project* and *Mark on Track*.
+- **Earned value at the status date:** SPI, CPI, EAC and the rest, plus physical % complete.
+
+### Agile board
+
+- **Tickets:** stories, tasks, bugs, epics and sub-tasks, with story points, priorities, labels and links.
+- **Sprints:** start and complete them, with a goal and committed scope. Columns are editable and can have WIP limits, and the board can use swimlanes.
+- **Progress feeds the schedule:** a sprint's % complete comes from its tickets, and an epic can drive a Gantt task's % complete.
+- **Releases (fix versions):** each has a projected date and can stand behind a Gantt milestone.
+- **Jira CSV:** import and export.
+
+### Risk register
+
+- **One register** for risks, opportunities and issues. Each can be tied to tasks, resources, releases or the whole project, and tasks with open risks show an indicator.
+- **No standard, or the DoD or PMI rules.**
+  - **DoD** (RIO Guide 2023): *If … then …* statements, consequence rated separately for cost, schedule and performance, Accept / Avoid / Transfer / Control handling, and a burn-down of the handling steps.
+  - **PMI:** cause → risk → effect statements, probability × impact scores, response strategies, triggers, contingency and fallback plans.
+- **A 5×5 risk matrix,** with an arrow from each risk to its target rating. Click a cell to filter the register.
+- **Every risk has** an owner, status, dates, cost and schedule impact and EMV, and the register exports as CSV.
+
+![The Risk Register: a DoD register, the 5×5 risk and opportunity matrices, and a risk's If/then statement](docs/risks.png)
+
+### Files and sharing
+
+- **Native files:** `.pfcg`, which is readable JSON.
+- **Microsoft Project XML** in and out. Project, ProjectLibre and other MPXJ-based tools open it.
+- **Print or PDF:** the view as it is, on as many pages as it needs.
+- **Copy Picture** of the view, and **CSV** export of the tasks or the risk register.
+- **Reliability:** AutoRecover, saves that can't leave a half-written file, and recovery from internal errors without closing the window.
+
 | | |
 |---|---|
-| ![The board: issue types, epics, releases, burndown and velocity](docs/board.png) | ![Releases with progress and projected dates, and the cumulative flow chart](docs/releases.png) |
-| The Board: a sprint's tickets, the backlog, burndown and velocity | Releases (fix versions) and the cumulative flow chart |
-| ![Tasks grouped by resource under a custom filter](docs/grouping.png) | ![Tracking Gantt: baselines, slippage and a progress line](docs/tracking.png) |
-| Group by Resource, with a custom filter | Tracking Gantt: baselines, slippage, a progress line at the status date |
-| ![Resource Usage with an overallocation in red](docs/usage.png) | ![The dark theme](docs/dark.png) |
-| Resource Usage: hours per day, overallocations in red | Dark mode (follows the desktop, or View ▸ Theme) |
+| ![The board: issue types, epics, releases, burndown and velocity](docs/board.png) | ![Tracking Gantt: baselines, slippage and a progress line](docs/tracking.png) |
+| The Board: a sprint's tickets, the backlog, burndown and velocity | Tracking Gantt: baselines, slippage and a progress line |
+| ![Resource Usage with an overallocation in red](docs/usage.png) | ![The Network Diagram, critical path in red](docs/network.png) |
+| Resource Usage: hours per day, overallocations in red | Network Diagram |
 
-## Running on Bazzite
+## How to use it
 
-```sh
-chmod +x ProjectFCG-x86_64.AppImage
-./ProjectFCG-x86_64.AppImage            # blank project
-./ProjectFCG-x86_64.AppImage --sample   # sample software-release schedule
-./ProjectFCG-x86_64.AppImage --sample-agile   # sample with sprints, tickets and a backlog
-./ProjectFCG-x86_64.AppImage plan.pfcg
-./ProjectFCG-x86_64.AppImage plan.xml    # a Microsoft Project XML file (imported)
-./ProjectFCG-x86_64.AppImage --self-test   # headless engine check, prints OK
-```
+The idea that makes everything else make sense: **you don't type dates, you type facts, and the engine works out the dates.**
 
-* Bazzite ships **Gear Lever** for integrating AppImages into the app menu;
-  that is the easiest way to "install" it. **Updates:** from 0.9 on, the
-  AppImages on GitHub's releases page carry their update address, so Gear
-  Lever's *Check for updates* finds new versions by itself. An AppImage from
-  0.8 or earlier doesn't know where it came from: in Gear Lever, open
-  ProjectFCG, *Update management*, choose **Github**, set *Username/Repo* to
-  `AnonyMap/ProjectFCG` and *Release file name* to
-  `ProjectFCG-*-linux-x86_64.AppImage`. (Locally built AppImages have no
-  update address.)
-* The AppImage uses the static type-2 runtime, so it does **not** need
-  `libfuse2`. If FUSE is unavailable for any reason, run it with
-  `--appimage-extract-and-run`.
-* Runs natively on **Wayland** (KDE/GNOME) and on X11. The binary links only
-  libc/libm/libgcc_s; X11, Wayland, EGL/OpenGL and xkbcommon are loaded from
-  the host at runtime, so it uses Bazzite's own Mesa drivers. Requires
-  glibc ≥ 2.39 for AppImages built on this machine; the ones GitHub builds
-  (see *Releases*) need only glibc ≥ 2.35 (Ubuntu 22.04 and later).
-* File dialogs use the XDG desktop portal (KDE/GNOME native dialogs). If no
-  portal answers, a built-in dialog is used instead. Set `PROJECTFCG_NO_PORTAL=1`
-  to force the built-in one.
+The facts are:
 
-## What's implemented
+- how long each task takes;
+- what each task waits for;
+- who does it;
+- what calendar they work.
 
-### Scheduling engine (`src/schedule.rs`, `src/calendar.rs`)
-| Project feature | Status |
-|---|---|
-| Working-time calendars (Standard, 24 Hours, Night Shift), weekly pattern, exceptions/holidays | ✅ |
-| Durations in min/hr/day/wk/mo, elapsed durations (`3ed`), estimated (`1 day?`), hours/day & hours/week options | ✅ |
-| Links FS / SS / FF / SF with lag, lead, percent lag (`3FS+50%`) and elapsed lag | ✅ |
-| Predecessor text notation (`2,3SS+1 day,4FF-2d`) | ✅ |
-| Links to/from summary tasks (apply to all subtasks); invalid ones refused like Project | ✅ |
-| Circular-link detection (refused with a message) | ✅ |
-| Constraints ASAP, ALAP, SNET, SNLT, FNET, FNLT, MSO, MFO; "honor constraint dates" option | ✅ |
-| Typing a Start/Finish on an auto task sets SNET/FNET (Project behaviour) | ✅ |
-| Deadlines (green arrow, missed-deadline indicator, drives slack) | ✅ |
-| Manually scheduled tasks (pinned dates; drive successors) | ✅ |
-| Summary rollup (dates, duration, duration-weighted % complete) | ✅ |
-| Critical path, total slack, free slack, early/late dates, negative slack | ✅ |
-| Automatic calculation on/off (Ctrl+F9) and F9 recalculation | ✅ |
+Change a fact and every date that depends on it moves. Typing a date into an auto-scheduled task doesn't move it the way you might expect: it adds a *constraint* (Start No Earlier Than), as in Project. Use a link instead whenever there's a reason behind the date.
 
-### User interface (`src/app/`)
-* **Ribbon** with File / Task / Project / View / Format / Help tabs and a quick-access toolbar (Save, Undo, Redo).
-* **Entry table**: ID, Indicators, Task Mode, Task Name, Duration, Start, Finish, Predecessors. 23 fields can be inserted (right-click a header, or Format ▸ Insert Column): Successors, % Complete, Total/Free Slack, Early/Late Start/Finish, Constraint Type/Date, Deadline, WBS, Unique ID, Critical, Milestone, Notes. Columns are resizable.
-* Excel-style editing: type to replace, F2 to edit, Enter/Tab/arrows to commit and move, Esc to cancel. Date cells have a drop-down calendar; choice cells (Task Mode, Constraint Type, Milestone) have drop-down lists. Typing in the blank row adds a task.
-* **Gantt chart**: two-tier timescale (Hours → Years, Project's nine presets plus continuous zoom), nonworking-time shading, today line, task/summary/milestone/manual bars, progress bars, critical-path colouring, slack bars, deadline markers, elbow-routed link lines for all four link types.
-* **Mouse in the chart**: drag a bar to move it (sets SNET, as Project does), drag its right end to change duration, drag vertically onto another bar to create a Finish-to-Start link, double-click a bar for Task Information, double-click a link for Task Dependency. Hover tooltips show dates. Ctrl+wheel zooms; Shift+wheel scrolls horizontally.
-* **Timeline** pane (View ▸ Timeline): project span, tasks marked "Display on Timeline", today, and the visible window. Click or drag it to pan.
-* **Dialogs**: Task Information (General / Predecessors / Advanced / Notes), Project Information, Change Working Time (month view, exceptions, work weeks), Options, Task Dependency, Go To, Find, Keyboard Shortcuts (F1).
-* Outline: indent/outdent, collapse/expand, outline levels, move up/down, Insert Summary Task, Insert Milestone, filters (Critical, Milestones, Summary, Incomplete, Completed), Project Summary Task row, outline numbers.
-* Cut/copy/paste of tasks (links between pasted tasks are preserved; the system clipboard gets tab-separated text), Fill Down, multi-level undo/redo.
-* Save/open `.pfcg` files (JSON, atomic writes), export CSV, "save changes?" prompt, drag-and-drop a file onto the window to open it.
+Start with `--sample` to see a finished plan, or **File ▸ New** for a blank one. A typical plan goes like this:
 
-### New in 0.2: Gantt formatting, critical path analysis, text size
+1. **Set the frame.**
+   - **Project ▸ Project Information:** the start date, or a finish date to schedule backward from.
+   - **Project ▸ Change Working Time:** working days, hours and holidays.
+2. **List the work.** Type tasks into the table with a duration each (`5d`, `2w`, `4h`, or `1 day?` for a guess).
+   - Indent tasks (Alt+Shift+→) to group them under a **summary task**. A summary's dates come from its subtasks.
+   - A task with a duration of `0d` is a **milestone**.
+3. **Link the tasks.**
+   - In the Predecessors column, type `3` (starts after task 3 finishes) or `3SS+2d` (starts 2 days after task 3 starts).
+   - Or select tasks and press Ctrl+F2, or drag from one bar onto another.
+4. **Read the schedule.**
+   - **Format ▸ Critical Tasks** shows the tasks that set the finish date. Any delay to them delays the project.
+   - **Slack** is how far a task can slip before it does.
+   - **Task ▸ Inspect** explains any task's start date, and offers fixes.
+5. **Add people.**
+   - Add them in the **Resource Sheet**, then type their names in the Resource Names column.
+   - Adding a second person to an effort-driven task shortens it. Someone booked on two things at once turns red.
+   - **Resource ▸ Level All** delays work until nobody is overbooked.
+6. **Save a baseline** (**Project ▸ Set Baseline**) once the plan is agreed. It's the yardstick that progress and slippage are measured against.
+7. **Track progress.**
+   - Set a status date, then enter % complete or actual dates (Task ▸ Update Tasks), or use **Project ▸ Update Project** for many tasks at once.
+   - The **Tracking Gantt** shows actuals against the baseline, and the **Earned Value** table says whether you're ahead or behind on time and money.
+8. **Share it.**
+   - Save as `.pfcg`, or **File ▸ Save as XML** for someone using Microsoft Project.
+   - **File ▸ Print** gives a PDF.
 
-**Text size & zoom** (View ▸ Text Size, or the A−/A+ buttons in the status bar)
-* Table and chart text from 9 to 28 pt; rows, header, indents and column widths scale with it. Ctrl+Shift+> / Ctrl+Shift+< change it, Ctrl+0 resets.
-* Separate whole-interface zoom (80–250%) for the ribbon and dialogs too (Ctrl+Alt+= / Ctrl+Alt+-).
-* Both are remembered per user in `~/.config/projectfcg/prefs.json`.
+**Teams working in sprints:**
 
-**Colors and bar formatting** (Format tab, saved with the project)
-* **Bar Styles** dialog with 11 categories: Task, Critical, Manual, Late, Milestone, Summary, Project Summary, Progress, Slack, Baseline, Deadline. Each has fill/border colour, pattern (solid, hatched, light, outline), height, start/end shapes (bracket, triangle, diamond, circle, arrow), and text on the left/right/top/bottom/inside of the bar, chosen from 15 fields.
-* **Gantt Chart Style** gallery: 10 colour schemes in one click.
-* **Format Bar**: colour individual tasks' bars (also in the right-click menu).
-* **Text Styles**: colour and bold for all/critical/summary/milestone rows, and the highlight colour.
-* **Gridlines**: Gantt rows, sheet rows/columns, top/bottom tier columns, current date, status date, project start/finish lines, with colours.
-* **Layout**: link style (elbow / straight / hidden), 8 date formats, bar height, bar text on/off, short dates in bar text.
-* **Timescale**: automatic, or 1–3 custom tiers (unit and count each); nonworking time behind or in front of bars, or hidden, in a chosen colour.
+- Mark a task as a sprint (**Board ▸ New Sprint**), then plan stories into it on the **Board**.
+- The sprint stays one bar on the schedule. Its tickets don't each become a row, and its % complete follows the stories that are done.
+- A schedule task can wait on a story: type the story's key, such as `APP-12`, in Predecessors. It then follows the end of whichever sprint that story is in.
 
-**Critical path analysis**
-* Critical Tasks, Slack bars and Late Tasks switches. Late is measured at the status date, or today if there's none.
-* **Multiple critical paths** (Project tab): each independent chain is critical against its own finish.
-* **Task Path** (Format ▸ Task Path): highlight the selection's predecessors, *driving* predecessors, successors and *driven* successors in Project's orange/purple colours.
-* **Task Inspector** (Task ▸ Inspect): what drives the selected task's start (which predecessor link, constraint, summary constraint, project start, manual dates or ALAP), its slack and late dates, the full driving path (click to jump), and one-click fixes: Respect Links, Auto Schedule, Clear Deadline.
-* Columns: Start Slack, Finish Slack, Status (Complete / On Schedule / Late / Future Task).
-* **Highlight** (View tab): shade rows matching a filter without hiding others. New filters: Late Tasks, Slipping Tasks.
+**Risks:**
 
-**Views and baselines**
-* View ▸ **Gantt Chart / Tracking Gantt / Detail Gantt**. Tracking shows actual bars over baseline bars with the critical path; Detail shows the critical path with slack bars.
-* Project ▸ **Set / Clear Baseline** for the whole project or selected tasks (rolled up to summaries). Columns: Baseline Start/Finish/Duration, Start/Finish/Duration Variance.
+- In **View ▸ Risk Register**, choose a standard (or none) and add risks.
+- To tie a risk to a task, right-click the task ▸ *Add Risk for Task*.
+- The matrix shows where risks sit and where their handling should take them.
 
-### New in 0.3: resources and assignments
+Undo (Ctrl+Z) covers every edit. **F1** lists all keyboard shortcuts, which are Project's: Insert adds a task, F2 edits a cell, Shift+F2 opens Task Information, and F9 recalculates.
 
-**Resources** (Resource tab ▸ Resource Sheet)
-* Work, Material and Cost resources, with Initials, Group, Max Units, Std. Rate, Ovt. Rate, Cost/Use and Accrue At columns. The sheet is edited like the task table: type in the blank row to add a resource, Insert / Delete, F2, Shift+F2 for Resource Information.
-* Rates are typed the way Project takes them: `$50/hr`, `400/d`, `2000/w`, `$120` per unit for material resources.
-* **Resource calendars**: each resource inherits the project calendar and can add its own work week and exceptions (Resource Information ▸ Working Time). Vacations move that person's work and no one else's.
-* Overallocated resources are shown in red with Project's red-person indicator, in the sheet and in the task table.
+## Development
 
-**Assignments**
-* Type into the **Resource Names** column using Project's notation: `Alice, Bob[50%], Test devices[5 devices], Cloud hosting[$1,200]`. Unknown names are added as resources (File ▸ Options ▸ *Automatically add new resources*). A new resource's type is inferred from the notation: a labelled quantity (`[5 devices]`) makes a material resource and a money amount makes a cost resource. Options also sets the default task type, effort-driven default and currency symbol.
-* **Assign Resources** window (Alt+F10), which stays open while you move between tasks like Project's: ✔ marks, Units, Cost, Assign / Remove, add a resource by name.
-* Task Information ▸ **Resources** tab; task type, effort-driven and priority on the Advanced tab.
-* **Work = Duration × Units**, with Project's three task types. *Fixed Units* (default): changing duration changes work. *Fixed Duration*: changing work changes units. *Fixed Work*: changing duration changes units. **Effort-driven**: adding a second person to a 4-day job makes it 2 days.
-* Each assignment runs on its resource's calendar, and the task's duration is its longest assignment. If you give two people different amounts of work, the task finishes when the slower one does, and the shorter assignment ends early, as in Project.
-* Columns: Resource Names, Resource Initials, Work, Cost, Fixed Cost, Type, Effort Driven, Priority, Leveling Delay, Overallocated. Bar labels can show resource names, initials, work or cost.
+**Technology**
 
-**Costs**
-* Work hours × standard rate + cost per use; material quantity × rate; fixed amounts for cost resources; per-task fixed cost. These roll up through summary tasks to the project total, shown on the Resource tab.
+- Rust, with the [egui](https://github.com/emilk/egui) toolkit over OpenGL. It's one native binary with no runtime to install.
+- About 37,000 lines of application code and 11,000 lines of tests.
+- Its only libraries are for dates, JSON, XML, PNG, the window and file dialogs.
+- **It makes no network connections.** The only other programs it ever starts are your desktop's theme setting reader (to follow light/dark mode) and your PDF viewer (to print).
 
-**Usage views**
-* **Resource Usage**: each resource with its assignments underneath, and work per day, week or month (follows the timescale). Overallocated periods are red.
-* **Task Usage**: the same grid, grouped by task.
+**Structure.** The scheduling engine (`src/*.rs`) is a library with no user interface: calendars, the critical-path scheduler, resources and leveling, tracking, the board, risks, and file formats. The desktop app (`src/app/`) sits on top of it. That separation is what lets the tests drive the engine directly and the real interface without a window.
 
-**Leveling** (Resource tab ▸ Level)
-* **Level All / Level Selection** delay tasks until no resource is booked over its max units. **Clear Leveling** undoes it, and **Next Overallocation** jumps to the next conflict.
-* Leveling Options: order (ID Only, Standard, Priority/Standard) and *level only within available slack*. Priority 1000 means "never delay this task", as in Project.
-* The delay is a visible, editable **Leveling Delay** field, and the **Leveling Gantt** view (View tab) draws it as a bar in front of the task. The Task Inspector reports "delayed by leveling" as the start driver.
-* Problems leveling can't fix are listed after it runs instead of being silently ignored: an assignment needing more units than the resource has, a delay larger than the slack when *within slack* is on, or a resource still overallocated.
+**How correctness is checked.** 414 automated tests run on every release:
 
-### New in 0.4: themes, dark mode, speed
+- **Hand-derived expectations:** scheduling tests whose dates were worked out by hand from Project's rules.
+- **Reference implementations:** the fast calendar arithmetic and the fast leveler are compared with slow, obviously-correct versions on thousands of random cases.
+- **Randomized invariants:** links are honoured, slack matches the critical path, undo and redo are exact, and saving then loading changes nothing.
+- **Interoperability:** Project XML is checked against the schema's element order and cross-checked by a second, independent XML reader (MPXJ).
+- **Fuzzing:** thousands of damaged files, random edits and random clicks, in every view, must never crash or hang.
+- **Headless UI tests:** the real interface is driven through keystrokes, clicks and drags.
+- **Reviews:** since 0.6, every version has had a separate review pass over its new code, and every confirmed bug got its own regression test.
 
-**Themes** (File ▸ Theme, the ☀/🌙 button in the status bar, or Ctrl+Shift+F11)
-* Six accent colours: **Navy** (default), **Green** (Project's classic look), Teal, Purple, Burgundy, Graphite.
-* **Light**, **Dark**, or **Use system setting** (the default). The system setting asks the desktop through the XDG portal, which KDE (including Bazzite) and GNOME support, and follows it live when you switch the desktop between light and dark. Without a portal it reads KDE's or GNOME's own settings, and failing that it uses light. `PROJECTFCG_SYSTEM_THEME=dark` overrides the detection.
-* Every theme, in both modes, is tested against WCAG contrast targets: 4.5:1 for text and 3:1 for lines and bars.
-* **Project files are theme-independent.** Bar, gridline and text-style colours stay as you chose them in the file. In dark mode they're adapted on screen only: a colour that would vanish against the dark chart, such as a black summary bar or the light grey gridlines, has its lightness mirrored while keeping its hue. Colours that already stand out (critical red, task blue) are untouched. Printing, sharing and light mode always see the original colours. The Bar Styles dialog says so in dark mode.
+**Where it differs from Project.** Some choices were deliberate, such as JSON files instead of `.mpp` and the leveling heuristic. Each is recorded with its reasoning in [docs/DECISIONS.md](docs/DECISIONS.md).
 
-**Performance** (measured on generated projects; see `tests/perf.rs`)
-| | 0.3 | 0.4 |
-|---|---|---|
-| Schedule 5,000 tasks | 140 ms | 26 ms |
-| Edit + reschedule, 5,000 tasks | 160 ms | 38 ms |
-| Level 2,000 tasks / 40 resources | 35 s | 0.23 s (3.7 s if the plan has ALAP tasks) |
-| Level 5,000 tasks / 80 resources | too slow to measure | 0.56 s |
-| Task Usage view, 5,000 tasks | 21 ms/frame | 2 ms/frame |
+Known gaps:
 
-* Working-time arithmetic counts whole weeks at once instead of walking day by day, then corrects for holidays and vacations. It is checked against the day-by-day version on thousands of random calendars and intervals.
-* Leveling places tasks in dependency order (a serial schedule-generation scheme). It then recomputes only the tasks a delay can affect, just before they're needed, instead of rescheduling the whole project after every delay. A test checks it gives *exactly* the same result as the slow way on 80 random projects.
+- no `.mpp` files (use XML);
+- no split tasks, work contours or overtime;
+- leveled dates can differ from Project's on the same plan;
+- PDFs print only Western European characters;
+- the Windows and macOS builds are unsigned.
 
-**Fixes**
-* Leveling: an SF or lead-linked successor that starts before its predecessor could be pushed back into a conflict after it was placed. A delay could be absorbed by a Start No Earlier Than constraint, or by a resource's day off, and leave the task where it was. On 40 random projects, leveling now leaves fewer resources overallocated with 6.5% less total delay.
-* Moving with the arrow keys into a column off the right edge of the table now scrolls it into view.
-* Assign Resources: the Units and Cost fields were too narrow to read.
-* The default "today" line colour was too faint on white (2.6:1); new projects use a darker orange.
+**More detail:**
 
-### New in 0.5: Kanban board
+- [docs/CHANGELOG.md](docs/CHANGELOG.md): what each version added, and the bugs found along the way.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): building, the release workflow, the full test inventory and the source layout.
+- [docs/DECISIONS.md](docs/DECISIONS.md): every design decision and why.
 
-A hybrid of plan and board: **sprints are tasks on the Gantt chart, and tickets (stories) live on the Board**. A sprint is one bar on the schedule, a fixed timebox linked like any other task. Its tickets don't clutter the Gantt or get scheduled one by one.
+Issues and pull requests are welcome. A crash report (in the `crash-reports` folder next to the AutoRecover copies) is the most useful thing to attach to a bug; it never contains your plan.
 
-* **Board tab** (or View ▸ Board). Pick a sprint (◀ ▶ or the list) and see its tickets in **To Do / In Progress / Review / Done**. The toolbar shows the sprint's dates, working days left, and points done.
-* **Backlog** panel on the left: tickets not planned into any sprint. Drag a card into a column to plan it; drag it back to un-plan it. Collapse the panel with ⏴.
-* **Cards** show the ID, story points and the assignee's initials. Drag them between columns, reorder within a column, or right-click to move to another sprint or the backlog. Double-click (or Enter) opens the ticket: title, story points (1·2·3·5·8·13 one click away), status, sprint, assignee, description.
-* **Quick add**: type into "+ Add a ticket…" at the bottom of To Do (or at the top of the backlog) and press Enter.
-* **Keyboard**: arrows select cards, Ctrl+←/→ moves a card between columns (Ctrl+→ from the backlog plans it into the sprint), Ctrl+↑/↓ reorders, Insert adds a ticket, Enter edits, Delete deletes. All of it is undoable.
-* **Sprints**: Board ▸ **New Sprint** adds a Fixed Duration sprint (10 working days by default, configurable) after the last sprint, linked finish-to-start. Or mark any task as a sprint: Board ▸ Mark as Sprint, right-click ▸ Mark as Sprint, or Task Information ▸ Advanced. Sprints get a board icon in the Indicators column, with a tooltip summarising progress. Right-click ▸ Open on Board jumps to that sprint.
-* **Estimate in story points or ticket count** (Board ▸ Estimate). The choice drives everything below.
-* **Progress flows to the schedule**: a sprint's % complete is the share of its points (or tickets) in Done. It can't be typed over, and the sprint's dates don't move: scope flexes, the timebox doesn't. Tickets with no points are flagged in the toolbar.
-* **Burndown** for the selected sprint: remaining points per working day against the ideal line, live for today.
-* **Velocity**: planned and completed per sprint, plus the average of the last three sprints that have ended. The Board tab also shows that average, so you can size the next sprint against it.
+## Built with AI
 
-### New in 0.6: tracking, epics, Jira and Project interchange
+ProjectFCG's code, tests and documentation were written by an AI model (Anthropic's Claude, working in Claude Code). A human maintainer directs it: they decide what gets built, try each release on their own machine, and choose what is merged and released.
 
-**Tracking and earned value** (Project's Task ▸ Tracking and Project ▸ Status groups)
+What that means for you:
 
-* **Actual Start / Actual Finish / Actual Duration / Remaining Duration** columns, editable in the table. % complete stamps the actual start from the scheduled one, and 100% stamps the actual finish; an actual start pins the task, so links and constraints no longer move it.
-* **Task ▸ Mark on Track** sets % complete to what the schedule expects at the status date. **Update Tasks** (Task ▸ 📝) edits % complete, actual and remaining duration, and actual dates together.
-* **Project ▸ Update Project**: "update work as complete through" a date, either proportionally or 0%/100%, for all tasks or the selection, and optionally "reschedule uncompleted work to start after" it. **Status date** is in the Project tab.
-* **Baselines 0–10** (Project ▸ Set Baseline shows when each was last saved), with work and cost. Format ▸ Show baseline picks which one the Gantt draws.
-* **Progress lines** (Format ▸ Progress Lines): a line at the status date that bends left to each task's progress point. Peaks to the left are behind schedule.
-* **Earned value** at the status date against Baseline 0: BCWS, BCWP, ACWP, SV, CV, SPI, CPI, BAC, EAC, VAC, TCPI, as columns (Insert Column ▸ Earned Value) and in **Project ▸ Statistics**.
-* **Tables** (View ▸ Table): Entry, Schedule, Tracking, Cost, Work, Earned Value, Variance. Each switches the columns, as in Project.
+- **Everything is open.** All the source is in this repository under the MIT license. You can read it, build it yourself instead of trusting a download, and use or change it however you like.
+- **The checks were automated, and largely AI-run too.** The test suite, the fuzzing and the code reviews described above catch a great deal, and every finding is pinned by a test you can run. But the reviews were also done by AI, so they are not a substitute for an independent human audit. If you rely on ProjectFCG for something that matters, verify its numbers against your own expectations, as you would with any new tool, and report anything that's off.
+- **Your data stays yours.** Plans are plain JSON files on your disk, and the app makes no network connections. Both claims are easy to check in the source.
 
-**Epics, issue types and links** (Jira's model, on the Board)
+## License
 
-![The Board: issue-type badges, keys, priorities, epic, release and label chips, sub-tasks, burndown and velocity](docs/board.png)
-
-* **Issue types**: Story, Task, Bug, Epic, Sub-task, with a coloured badge on each card. **Priority** (Highest…Lowest, Jira's chevrons), **labels**, and ticket **keys** ("APP-12") with a prefix per project.
-* **Epics** group stories across sprints. The panel on the left has a second tab, **Epics**, listing each with a progress bar. Click one to show only its tickets, or drag a card onto it to add the card. **An epic can drive a Gantt task**: pick "Drives task" in the epic, and that task's % complete follows the epic's stories, the way a sprint follows its tickets. The plan shows feature progress without anyone typing a percentage.
-* **Sub-tasks** split a story. They travel with their parent's sprint, show "↳ APP-11" on the card, and the parent shows "2/3" done. Add them from the ticket dialog or right-click ▸ Add Sub-task.
-* **Links**: blocks / is blocked by, relates to, duplicates, clones. A card with an unfinished blocker gets a red edge and "Blocked". Blocking cycles are refused.
-* **Filter bar**: text (Ctrl+F; matches summary, description, key and labels), epic, type, label, assignee. Esc clears it. New tickets join the epic you're filtering on.
-
-**Jira CSV** (File ▸ Share, or Board ▸ Jira)
-
-* **Import** a Jira export (Filters ▸ Export ▸ CSV, all fields). The columns read are Summary, Issue key/id, Issue Type (or *Work type*), Status, Priority, Assignee, Labels, Sprint, Story Points / Story point estimate, Parent, Epic Link, Description, Created, Resolved, and the issue-link columns. Issues are added to the current board, and Undo removes them. Missing sprints can be added to the schedule; missing assignees can be added as resources. Everything that didn't map is listed afterwards.
-* **Export** the board as a CSV that Jira's importer reads (System ▸ External System Import ▸ CSV): parents before children, Parent as an issue id, repeated Labels and link columns.
-
-**Microsoft Project XML (MSPDI)**
-
-* **File ▸ Save as XML** writes a file Project desktop opens directly (File ▸ Open ▸ XML), as do ProjectLibre and anything built on MPXJ. **Open** reads `.xml` files: tasks and outline, durations (including elapsed and estimated), all link types with lag (time, elapsed and %), constraints, deadlines, manual tasks, notes, priorities, % complete and actuals, baselines 0–10, the project calendar with its exceptions (recurring ones are expanded), resources of all three types with their calendars, rates and accrual, and assignments.
-* Microsoft retired Project Online on September 30, 2026. MSPDI is the vendor-neutral way to move a plan between desktop Project and other tools.
-* After an import, ProjectFCG reschedules and says what didn't carry over, including how many tasks now start at a different time than in the file (task calendars, splits and work contours aren't supported yet).
-
-**Faster**
-
-* **Undo uses about 22× less memory**: history stores what changed, not a copy of the project. On a 5,000-task plan, 100 edits cost ~12 MB instead of ~320 MB.
-* **Big boards**: a 12,000-ticket board draws in 7.5 ms (it took 38 ms when each card's ticket was looked up by scanning the list). Sprint and epic progress is computed in one pass when the plan reschedules.
-
-### New in 0.7: the board and the schedule depend on each other
-
-**Tasks that wait on stories (and epics)**
-
-* A Gantt task can wait on a board item. Type its key in the Predecessors column (`3, APP-12, APP-27+2d`), or use Task Information ▸ Predecessors ▸ *Wait on board item*.
-* Until the story is done, the task follows **the end of the sprint the story is planned in**, the team's commitment. It's a real finish-to-start link in the schedule: the sprint gains a successor, slack and the critical path run through it, and leveling moves the task when the sprint moves. Move the story to a later sprint and the task moves with it.
-* Once the story is done, the task can start **when it was done**, which may be mid-sprint.
-* Waiting on an **epic** means waiting on all its stories: the latest sprint holding unfinished ones, or the last done date.
-* A story that isn't planned into any sprint has no date to wait for. It's reported (red indicator, tooltip, Task Inspector) rather than guessed.
-* The Gantt draws these links dashed in purple, from the sprint bar. The Indicators column shows a card icon, filled while something is still open. Hovering a link names the story.
-
-**Stories that wait on tasks**
-
-* In the ticket dialog, *Waits on tasks* picks Gantt tasks that must finish first. The card shows "waits: Contract" and a red edge until the task is 100% complete.
-* If its sprint starts before the task finishes, the card says **Planned too early**, as Jira Plans flags dependency conflicts. The same happens when a ticket is blocked by one planned in a later sprint. Right-click offers *Move to Sprint N (after what it waits on)*.
-* The ticket dialog also lists the tasks waiting on the ticket, so both sides of a dependency are visible from either end.
-
-**Jira's sprint lifecycle**
-
-* **Start Sprint** records a sprint goal and the committed scope, with workload by assignee. **Complete Sprint** freezes the sprint's result and moves unfinished tickets, with their sub-tasks, to the next sprint or the backlog.
-* Velocity now compares what was done with what was *committed*, so scope added mid-sprint, or work carried out at completion, no longer changes past sprints' bars. The goal shows in the board toolbar.
-* **Columns…** (Board tab) renames, adds, removes and reorders columns and sets **WIP limits**. A column over its limit turns amber and shows "4/3".
-* **Swimlanes** by epic or by assignee (filter bar).
-
-**MS Project**
-
-* **Recurring tasks** (Task ▸ Insert ▸ Recurring…): daily, weekly on chosen days, monthly or yearly, every N, ending after N occurrences or by a date. Like Project, the series is a summary whose occurrences are subtasks held at their dates. Task Information on the series edits the pattern.
-* **Inactive tasks** (Task ▸ Inactivate, or right-click): for what-if planning. An inactive task stays in the plan, struck through with a hollow bar. It doesn't move its successors, doesn't roll into its summary's dates, work or cost, and books no resource time. Saved to and read from Project XML (`Active`).
-
-![A task waiting on an epic: dashed links from Sprints 3 and 4; the Release milestone carries its release's flag](docs/board-deps.png)
-
-### New in 0.8: groups, filters, releases
-
-**Group By and filters** (View ▸ Data, as in Project)
-
-* **Group by** Complete and Incomplete, Constraint Type, Critical, Duration, Milestones, Priority, Resource, Status or Active v. Inactive, or **by any field** (dates group by week). Each group gets a header row with its tasks' dates, duration, work, cost and % complete, and a summary bar on the Gantt. Click a header to collapse it. Grouping combines with any filter.
-* **Custom filters** (Filter ▸ New Filter…): conditions on any field (*equals, is greater than, is within, contains* …) joined by And/Or, with *Show related summary rows*. Fields are compared by type: durations as durations ("is greater than 3w"), dates by day, money and % as numbers. Saved in the project file, undoable, and also usable as highlights.
-* **Date Range…** (tasks under way between two days) and **Using Resource…** filters.
-* On a 5,000-task plan a custom filter costs about 1 ms per redraw, and grouping on top of it about 3 ms.
-
-**Releases (Jira's fix versions), tied to the schedule**
-
-* Board ▸ **New Release**, or the **Releases** tab next to Backlog and Epics. Drop a card on a release to put it in, or pick one in the ticket dialog. Filter the board by release.
-* Each release shows its progress and a **projected date**: the end of the latest sprint still holding unfinished stories. It's **At risk** when that's after the release date, and **Unplanned work** while some stories aren't in a sprint.
-* **A release can stand behind a Gantt milestone** (Release ▸ Milestone, or *Add Milestone to Schedule*). The milestone waits on every unfinished story in the release, as a task waiting on an epic does, and the release date becomes its deadline, so the Gantt flags a release that won't make it. Link marketing, docs or deployment tasks to the milestone and they follow the release. The milestone gets a flag in the Indicators column with the release's status.
-* **Release…** marks it released and moves unfinished stories to the next release (or out). Released releases take no new work.
-* Jira CSV import and export carry **Fix Version/s**.
-
-**Board**
-
-* **Cumulative flow** (the Flow tab above the burndown): tickets in each column, day by day, from 0.8 on (each move is recorded). Earlier moves are inferred: To Do until the ticket was done.
-* Over a weekend the sprint that ended on Friday stays the board's current sprint until it's completed or the next one starts, as Jira's active sprint does. (Before, the board jumped to the next sprint at 5 pm on Friday, and the agile sample completed the running sprint if opened at a weekend.)
-
-**Gantt**
-
-* **Slippage** (Format ▸ Slippage): a line from each task's baseline start to its start; red when it's later.
-* **Copy Picture** (Task ▸ Clipboard): saves the view as it looks on screen as a PNG.
-
-**Faster**
-
-* Finding a top-level task's summary used to scan back to the first row, which made anything that walks the outline quadratic on big plans. Custom filters with *Show related summary rows* went from 18 ms to 2 ms per redraw on 5,000 tasks.
-
-### New in 0.9: print, task calendars, custom fields
-
-**Print and PDF** (File ▸ Print…, Ctrl+P)
-
-* The view as it is, with filter, groups and collapsed rows, on as many pages as the rows need. The sheet's first columns are on the left and the Gantt bars (in the file's bar styles), links, baselines and the status date are across the page. The timescale tiers (weeks and days, months and weeks, quarters and months, years) are picked to fit.
-* Letter, Legal, Tabloid, A4 or A3, landscape or portrait, the whole project or a date range, headings on every page.
-* **Print…** opens the PDF in your viewer to print it; **Save as PDF…** keeps it. It's vector output in the PDF's standard fonts, so a 300-task plan is a few hundred KB.
-
-![A printed page: the table's first columns, Gantt bars in the file's styles, links and the timescale](docs/print.png)
-
-**Task calendars** (Project's base calendars)
-
-* **Change Working Time** now manages several calendars: the project calendar plus any you create, from a copy of the project calendar or from Project's *Standard*, *24 Hours* and *Night Shift*. Rename, edit the work week and exceptions, or delete them.
-* Give a task a calendar in **Task Information ▸ Advanced**, or type its name in the new **Task Calendar** column. A task on *24 Hours* runs around the clock; one on *Night Shift* runs 11 PM to 8 AM.
-* With resources, the task works only when both its calendar and each resource's calendar do (Project's rule), unless **Scheduling ignores resource calendars** is ticked. A task whose calendar and resources share no time is reported.
-* Task calendars travel through Project XML, which was the main cause of imported plans landing on different dates.
-
-![Change Working Time with a second calendar, Plant (Sat shifts): the month previews the work week as you edit it](docs/calendars.png)
-
-**Custom fields** (Project ▸ Custom Fields)
-
-* **Text1–10, Number1–10, Flag1–10, Date1–10 and Cost1–10** on every task. Rename any of them ("Team", "Risk"), add them as columns, type values in. Values are typed: numbers sort and filter as numbers, flags are Yes/No, dates are dates.
-* They work in custom filters, Group By (*by field*) and print, and travel through Project XML as Project's own custom fields (its field IDs, aliases and value formats), so they open in Project with the same names.
-
-![Custom fields renamed Team, Risk and Vendor as columns, beside the Task Calendar column (a Night Shift and a 24 Hours task)](docs/custom.png)
-
-**Bugs found by a review of the core** (12, all fixed and pinned by `tests/core_regressions.rs`)
-
-* A duration like `100000000d` or a lag like `+inf%` crashed the app. "NaN" typed into a cost or a % lag was saved, and the file then wouldn't open.
-* The **Delete** key deleted the whole task from any column. It now clears the field unless the Task Name cell or a whole row (click the row number) is selected, as decision 5 always said.
-* **Cut and paste**, the usual way to move tasks, lost their resource assignments; it now keeps them. Pasting could leave a link from a task to its own summary, and pasting thousands of rows was slow.
-* Update Project ▸ *Reschedule uncompleted work* ignored *Selected tasks*. Typing a Finish on a manual task with resources changed its duration but not its bar. A Fixed Work task set to 0 days lost its work for good. Elapsed units in Leveling Delay were read as working time. Edits that changed nothing left empty undo steps.
-
-**Bugs found by an independent review of the 0.9 work** (10, all fixed; 8 pinned by tests that fail on the old code)
-
-* The serious one: only the scheduler knew a task works on *its calendar ∩ its resources' calendars*. Actual Finish, typed finishes, bar resizing, assignment dates (so Resource Usage and leveling) and % scheduled each used a different calendar. A 3-day task on *24 Hours* with a Standard resource grew from 24h to 57h of work when you entered the finish it already had. All of them now share the scheduler's rule (decision 62).
-* Intersecting calendars wrote long exceptions out day by day and stopped after ten years, so a task could be scheduled during a resource's 14-year absence, and scheduling 5,000 tasks with task calendars took 14× longer. Exceptions now intersect as date ranges.
-* Number custom fields were rounded to 2 places by Fill Down and in Project XML (0.001 was lost). Clicking a bar then pressing Delete cleared a field instead of deleting the task. Printing a date range drew labels of bars outside it over the table. A pasted task could keep a deleted calendar and silently join the next one created. The filter dialog's field list rescanned every task 50 times a frame. A stray build file was committed.
-
-### New in 0.10: stability, Network Diagram, Calendar, sort, find and replace, schedule from finish, risk register
-
-**Stability**
-
-* **A bug no longer closes the window.** An edit that hits an internal error is undone and reported, and the plan stays as it was. A problem while drawing closes whatever dialog was open. If it happens again, ProjectFCG goes back to the last plan that drew cleanly. Either way it keeps running, and it says so in a notice.
-* **AutoRecover** (File ▸ Options, every 5 minutes by default) copies unsaved work to `~/.local/state/projectfcg/recovery` from a background thread. If the window is killed, the computer loses power, or something does crash, the next start offers the copy back. It opens as a new plan, so saving it never overwrites anything without asking. A second ProjectFCG window that's still running is never mistaken for a crash.
-* **Crash reports** go to `~/.local/state/projectfcg/crash-reports`. They hold what failed and where, never the plan's contents, and they're worth attaching to a GitHub issue.
-* **Saving can't truncate a file.** Saves, exports and preferences are written to a temporary file, flushed to disk, then renamed over the old one.
-* **Damaged files open.** An automated fuzzing campaign (thousands of mutated files, random edits and random clicks) found the crashes listed below. Every file opened now has its values pulled into range first: dates between 1900 and 2200, durations and lags within 100 years, finite numbers, unique IDs. A file whose numbers can't be right opens rather than crashing.
-* **Large plans level in the background** with a progress bar and Cancel, so the window never stops responding. Plans with ALAP tasks also level 2–3× faster.
-
-**New views** (View ▸ Network Diagram, Calendar)
-
-* **Network Diagram**: each task is a box with its name, start, ID, finish, duration and resources, in columns by the order the work happens. Critical tasks are red. Finished tasks are crossed out and tasks under way half crossed. Milestones are hexagons, summaries parallelograms, manual tasks dashed. Drag to pan, Ctrl+scroll to zoom, double-click for Task Information.
-* **Calendar**: a month of weeks with the tasks as bars across the days they run, wrapping from week to week, with "+N more" when a week is full. ◀ ▶ and the mouse wheel change month.
-
-![The Network Diagram: the sample's tasks as boxes in columns, critical path in red](docs/network.png)
-
-![The Calendar view: a month with the tasks as bars across their days](docs/calendar-view.png)
-
-**Project's everyday tools**
-
-* **Sort** (View ▸ Sort): by Start Date, Finish Date, Priority, Cost or ID, or *Sort By…* up to three fields, ascending or descending. The outline is kept, so subtasks sort under their summary, unless you untick that. *Permanently renumber tasks* reorders the plan itself. Sorting works inside groups too.
-* **Find and Replace** (Ctrl+F, Ctrl+H): any field, any test (contains, equals, is greater than…), down or up, match case. They follow the current filter and sort and open collapsed summaries to show a match. **Replace All** is one undo step, and all or nothing: if one replacement is invalid, nothing changes. Replacing a name in Resource Names reassigns the work.
-* **Move Task** (Task ▸ Move): forward or back 1 day, 1 week, 4 weeks or any number of working days. As in Project, auto-scheduled tasks get a *Start No Earlier Than* constraint, date constraints move with them, manual tasks just move, summaries move their subtasks, and started tasks stay put. Also *When Resources Are Available* and *Incomplete Parts to Status Date*.
-* **Schedule from the project finish date** (Project Information): tasks are scheduled as late as possible so the project ends on that date, and the start is worked out. New tasks are As Late As Possible, and tasks that can't make the date show negative slack. Project XML files scheduled this way now import as such.
-* **Physical % Complete** and **Earned Value Method** (per task, with a project default in Options): earned value can measure work done rather than time spent. They're in the Tracking table and in Project XML.
-
-![Sort By over the sample, sorted by Finish Date](docs/sort.png)
-
-**Risk register** (View ▸ Risk Register)
-
-Project itself has no risk register (teams keep one in a spreadsheet or in Project Online), so this one follows the two guides PMs are usually asked to report against, or neither:
-
-* **Risks, opportunities and issues** in one register, each tied to **tasks, resources, releases, or the whole project**. Right-click a task ▸ *Add Risk for Task* starts one. Tasks with open risks show a ⚠ in the Indicators column, coloured by the worst level, and its tooltip lists them.
-* **The standard is per register, and a risk can follow its own:**
-  * **None**: a free description, likelihood and impact 1–5, Low/Medium/High by L × I, an optional probability in %.
-  * **DoD** ([Risk, Issue, and Opportunity Management Guide, 2023](https://www.dau.edu/sites/default/files/2023-10/DoD%20RIO%20Guide%20Sep%202023.pdf)): an *If … then …* statement with a root cause; likelihood 1–5 (Not Likely >1–20% … Near Certainty >80–99%); consequence rated separately for **cost, schedule and performance**, with the guide's criteria as tooltips, where the worst counts. Handling is Accept / Avoid / Transfer / Control, or Pursue now / Defer / Reevaluate / Reject for opportunities. Issues have no likelihood and are rated on consequence alone. A **burn-down** charts the planned rating after each handling step against its date.
-  * **PMI** (PMBOK / Practice Standard for Project Risk Management): a cause → risk → effect statement; probability 0.1–0.9 and impact 0.05–0.80 (cost, schedule, scope, quality), with **P × I scores** (High ≥ 0.18, Moderate ≥ 0.05). Responses are Escalate / Avoid / Transfer / Mitigate / Accept, or Escalate / Exploit / Share / Enhance / Accept for opportunities. It adds triggers, contingency and fallback plans, secondary risks, urgency and the residual rating.
-* **Owner, status** (Open, Handling, Watch, Realized, Closed), dates, category, **cost and schedule impact, and EMV** (probability × cost).
-* **The 5×5 risk matrix** is coloured by the register's standard, with every open risk's ID in its cell. A second, blue matrix shows opportunities, and a strip shows issues by consequence. Click a cell to filter the register to it. *Show targets* draws an arrow from each risk to where its handling should take it. Right-click a cell to recolour it (*Reset* goes back to the standard).
-* **Sort and filter** by level, status, type or search, and **Export CSV** for a report. Every edit is one undo step, and the register is saved in the `.pfcg` file.
-
-![The Risk Register: the sample's DoD register, the 5×5 risk and opportunity matrices with target arrows, and a risk's If/then statement](docs/risks.png)
-
-**Crashes found by fuzzing** (all fixed and pinned by `tests/fuzz_repros.rs`; `tests/fuzz_stability.rs` keeps fuzzing on every test run)
-
-* Right-clicking a task and choosing **Cut Task** or **Delete Task** crashed every time: the table went on drawing rows that no longer existed.
-* Opening a file with a duration or lag of −9.2×10¹⁸ minutes overflowed the stack, which nothing can catch. Dates near the end of chrono's range (typed, or in a file), huge elapsed lags, and a recurring series starting in year 262142 crashed or hung the date arithmetic.
-* A task ID of 4294967295 in a file made new tasks reuse existing IDs.
-
-**Bugs found by an independent review of the 0.10 work** (9 confirmed, all fixed and pinned by `tests/review_10.rs`)
-
-* Opening a recovered plan deleted its only copy on disk straight away, and replaced unsaved work without asking. It now asks first, and the copy becomes the window's own until the plan is saved.
-* "Go back to the last plan that drew cleanly" could restore the very plan that broke, when the edit came from a dialog (dialogs apply their changes after the window has drawn). A plan now counts as good only once a frame has drawn it.
-* The background writer and the copy written after an error could save the same file at once and corrupt it, or an older copy could land after a newer one. Writes are now one at a time, in order, each with its own temporary file. Saving through a symlink replaced the link instead of the file.
-* Replace All on a date field added constraints without changing a date. Move Task moved finish constraints to the start of a day. Fill Down in a sorted view copied the lowest ID rather than the top row shown. In a plan scheduled from its finish, the fast leveler disagreed with the reference.
-* Also from the review: a window that has just woken from sleep is never mistaken for a crashed one, failed AutoRecover writes are retried, a background thread's error can't end up in the window's crash report, the Network Diagram's critical links follow F9, and Jira CSV dates are brought into range. A 1,000-year working exception made each calculation take seconds; exceptions are now looked up by binary search and corrected per stretch rather than per day.
-
-### Keyboard shortcuts (Microsoft Project's)
-Insert (new task) · Delete / Ctrl+− (delete) · F2 (edit) · Shift+F2 (Task Information) · Ctrl+F2 / Ctrl+Shift+F2 (link / unlink) · Alt+Shift+→/← (indent/outdent) · Alt+Shift+↑/↓ (move) · Alt+Shift+− / = / Numpad* (hide / show / show all subtasks) · Ctrl+Shift+M / Ctrl+Alt+Shift+A (manual / auto) · Ctrl+Shift+F5 (scroll to task) · F5 (Go To) · Ctrl+F, Ctrl+H, Shift+F4 (find / replace / next) · F9, Ctrl+F9 (calculate / auto-calc) · Ctrl+/ and Ctrl+* (zoom) · Alt+Home/End, Alt+←/→, Alt+PgUp/PgDn (timescale) · Ctrl+D (fill down) · Ctrl+Delete (reset field) · Ctrl+Shift+F11 (light/dark) · Ctrl+Z/Y, Ctrl+X/C/V, Ctrl+N/O/S, F12 · Alt+F10 (Assign Resources). The full list is under Help ▸ Keyboard Shortcuts or F1.
-
-## Decisions I made (please review)
-
-1. **GUI: egui/eframe with the OpenGL (glow) backend**, not wgpu. This halves compile time and gives the most predictable AppImage, because GL comes from the host's Mesa. Everything is drawn by the app, so it looks like Project rather than native KDE/GNOME.
-2. **Themes are per user, not per file** (like text size), and **dark mode adapts the file's colours instead of storing a second set.** Two colour sets per file would drift apart, and someone receiving your file would see whatever you last picked. Adapting at draw time means one source of truth. Default theme: Navy, following the desktop's light/dark setting. (0.1–0.3 were light-only, in Project green.)
-3. **Native file format is JSON (`.pfcg`)**, not `.mpp`. `.mpp` is an undocumented binary format; the only mature reader is MPXJ (Java). Interop with Project is through MSPDI XML (0.6), which Project opens directly.
-4. **Lag is measured on the project calendar**, which is Project's default.
-5. **Delete key**: deletes the task when the Task Name cell or whole row is selected. In other columns it resets the field, following Project's "Delete = clear selected data" with its task-name exception.
-6. **Indenting a task under its own predecessor removes that link**, since Project forbids summary↔subtask links.
-7. **SS/SF links from a summary task**, in the backward pass, only constrain the subtasks that drive the summary's start. Applying them to every subtask would make later subtasks falsely critical.
-8. **Ctrl+F9 off** behaves like Project: edits update the outline and rollups, but task dates only move on F9. A "Calculate" link appears in the status bar.
-9. **Dialogs close on Esc or Cancel only**, not on clicking outside them, as in Project. A dialog ignores the Enter/Esc that opened it, so an error caused by pressing Enter isn't dismissed by that same keypress.
-10. **Task bars are labelled with resource names** as of 0.3, Project's default; 0.1–0.2 showed the task name because there were no resources. To get the old labels, use Format ▸ Bar Styles ▸ Text ▸ Right = Name. Project files saved by 0.2 keep their own bar styles.
-11. **Formatting is saved in the project file; text size and interface zoom are per user.** This mirrors Project, which keeps view formatting in the .mpp, while text size is an accessibility setting that should follow the person, not the file.
-12. **Critical / Slack / Late / Baseline switches and view changes are undoable** (Ctrl+Z), because they are part of the saved file. Task Path, Highlight and the Inspector are session-only.
-13. **Text-size keys are Office's Ctrl+Shift+> / <.** egui's built-in Ctrl+Plus/Minus interface zoom is turned off because Ctrl+Minus is Project's "delete row" (in 0.1.0 both fired at once). Interface zoom uses Ctrl+Alt+= / -.
-14. **"Late"** follows Project's Status field: complete is less than the schedule says it should be at the status date. Without a status date, today is used, as Project does.
-15. **Task Path works at subtask level**, like the scheduler: a link to a summary task makes all its subtasks predecessors. "Driving" means the link that sets the start; a task held by a constraint has no driving predecessor.
-16. **Eleven baselines** (0–10) since 0.6, as in Project. Earned value always measures against Baseline 0, which is Project's default "Baseline for Earned Value calculations".
-17. **Resources can't be assigned to summary tasks.** Project allows it, but the summary's work then sits on top of its subtasks' work and makes rollups and usage hard to read. Assigning at subtask level gives the same totals without that.
-18. **Leveling delay is stored in working minutes, measured from the task's early start** (after its links and Start/Finish No Earlier Than constraints, as Project defines the field), not as a date. It survives later edits, so leveling stays explainable: a task is always "N days after where it could otherwise start". No Later Than constraints still cap it when honoured. Project stores the delay in elapsed days. 0.3 applied the delay before constraints, so a constrained task could absorb it.
-19. **The leveling heuristic is serial.** Tasks are taken in dependency order: a task is never placed before a task that can move it, and the leveling order (priority/ID/standard) breaks ties. Each is placed at the first slot where every resource it uses has room. This is not Project's exact algorithm, so leveled dates can differ from Project's on the same file. The *outcome rules* match: priority, do-not-level (1000), within-slack, no splitting.
-20. **Flat work contours only, no overtime work.** Ovt. Rate is stored and shown but no work is booked as overtime. Accrue At is stored but costs are not yet time-phased, so it does not change any totals.
-21. **Late dates use resource-calendar spans too**, so a task done by a half-time person has correspondingly less slack. (0.2 used the project calendar for everything.)
-22. **Overallocation is judged per moment, not per day.** A resource is overallocated only if their booked units exceed max units at the same time, during their working time. Two 4-hour tasks on the same day, one in the morning and one in the afternoon, are not a conflict. This matches Project's red overallocation indicator. Project's leveling can additionally be set to look Day by Day or Week by Week, and ProjectFCG doesn't offer that setting.
-23. **Renamed Gantry → Ganttry (0.3) → ProjectFCG (0.4)** at the user's request; old files and preferences carry over automatically (see top). Project files use **`.pfcg`**, because `.fcg` is already registered for FastCGI scripts, which web servers and file managers would treat as code.
-24. **Plans with ALAP tasks level more slowly** (they fall back to full reschedules). An ALAP task's position depends on its successors, which breaks the one-direction recomputation the fast path relies on. They still level correctly.
-25. **Board tickets are not tasks.** Microsoft Project's subscription desktop client also has Task/Sprint boards, but there every card *is* a Gantt task: a 40-story sprint becomes 40 scheduled rows, and the scheduler plans each story, which isn't how a sprint works. Here the sprint is the scheduled unit, and its tickets are planned inside it by the team.
-26. **Ticket assignees are labels.** The team's workload comes from the resources assigned to the sprint task (the sample assigns a Dev Team at 400%). Booking ticket estimates on people as well would count the same hours twice. Assignees colour the cards and help you see who's on what; they don't affect usage, overallocation or leveling.
-27. **Sprint % complete comes from the board, and sprint dates don't.** Points done ÷ points planned (or tickets, in count mode). If nothing in a sprint is estimated yet, the share of tickets done is used. A sprint with no tickets keeps the % complete you type. When the last ticket leaves a sprint (or the epic driving a task goes away), the % complete it was given resets to 0% instead of staying at a figure nothing supports.
-28. **Velocity counts what's in Done now; burndown uses when each ticket reached Done.** "Planned" is the sprint's current scope, not a snapshot from sprint planning, so adding a ticket mid-sprint raises the planned bar and the burndown's starting point. Moving a ticket out of Done clears its done date. Summary tasks can't be sprints, and deleting or unmarking a sprint returns its tickets to the backlog.
-29. **The Board tab opens the board.** Other ribbon tabs don't change the view (as in Office), but this one is a workspace: clicking it shows the board. Gantt Chart in the same tab, or View ▸ Gantt Chart, goes back.
-30. **% complete is duration-based, and actual work and cost follow it.** This is Project's default ("updating task status updates resource status"). Resource costs accrue at start, end or prorated, from each resource's Accrue At setting. Fixed costs are prorated.
-31. **Update Project only ever raises progress**, so work already reported is never lost. "Reschedule uncompleted work" gives *unstarted* tasks a Start No Earlier Than the date. Project would also split *started* tasks to move their remaining work; ProjectFCG has no splits yet, so started tasks stay where they are.
-32. **EAC = ACWP + (BAC − BCWP) ÷ CPI**, the CPI-based forecast Project's EAC field uses. TCPI = (BAC − BCWP) ÷ (BAC − ACWP).
-33. **Epics never sit in a sprint, and neither epics nor sub-tasks count** toward sprint totals, burndown, velocity or epic progress. These are Jira's rules: an epic's size is its stories', and a sub-task is part of its parent's estimate, so counting either would double-count. Sub-tasks always share their parent's sprint. Moving the parent moves them, and they can't be moved to another sprint on their own.
-34. **An epic can drive a Gantt task, but not a sprint or a summary.** A sprint's progress already comes from its own tickets, and a summary rolls up. Several epics can drive the same task; their stories are pooled. Deleting the task unlinks the epic.
-35. **Ticket links don't move dates.** Tickets aren't scheduled, so "blocks" is information shown on the card, not a dependency the scheduler enforces. Use task links on the Gantt for that. Blocking cycles are refused anyway, because they always mean a mistake.
-36. **Jira import adds to the current board; it doesn't replace it.** Jira's issue numbers are kept when they're free and the key prefix matches, otherwise issues are renumbered and links and parents follow. Statuses map to columns by name first, then by meaning ("Closed" → Done, "In QA" → Review). Statuses with no match go to the first column and are listed. Labels are split on spaces, since Jira labels can't contain them. Without "add missing sprints", issues in unknown sprints go to the backlog.
-37. **Saving as XML is an export, opening XML is an import.** The document stays a `.pfcg`. After opening an `.xml`, Save asks for a new name, so the XML isn't silently overwritten with data it can't hold. The board isn't written to XML; MSPDI has no place for it. The sprint tasks themselves are written as ordinary tasks.
-38. **MSPDI units are Project's**, cross-checked by reading our files with MPXJ: currency in hundredths, rates per hour, lag in tenths of a minute (a % lag is the plain percentage), work and durations as ISO 8601. Elements are written in the schema's order, which Project validates on import. A test checks the order of every element against the schema's sequences.
-39. **Recurring calendar exceptions are expanded into single days on import** (yearly, monthly, weekly, daily, by date or by "last Monday" style position). They're written back as individual dates, so a holiday series becomes a list of holidays in Project. ProjectFCG lets exceptions overlap (the later one wins); Project doesn't, so overlapping exceptions are resolved day by day and written as non-overlapping ranges. A derived calendar's exceptions take precedence over its base calendar's.
-40. **A task waiting on an unfinished story follows the story's sprint, not a guess at the story's own date.** Tickets aren't scheduled inside their sprint (decision 25), so the sprint's end is the only date the plan commits to. It's pessimistic, but it can be explained in one sentence, and it gets earlier the moment the story is actually done.
-41. **Board dependencies are finish-to-start only** (with a lag). "Start when the story starts" has no meaning for an unscheduled ticket.
-42. **A ticket waiting on a task isn't enforced.** Moving a whole sprint later because one story waits would delay everyone's work, so the ticket is flagged instead, with a one-click fix. Jira Plans does the same with dependency conflicts.
-43. **Loops through the board are refused when you type them** (the sprint already waits on the task). When one appears later because a story moved, it's ignored and reported on the task, rather than making the whole schedule circular.
-44. **Project XML gets board dependencies as ordinary links** to the sprint task, so Project schedules the same dates. Dependencies on finished stories aren't written, since they're in the past. The board itself still isn't in the XML.
-45. **Starting and completing sprints is optional.** Dates still decide which sprint is running. Start/Complete add Jira's commitment and frozen results for velocity. A sprint completed without being started commits its scope at that moment.
-46. **Done is always the last column.** Removing a column moves its cards to the column before it. Adding a column after Done means cards that were done aren't any more (their done dates are cleared).
-47. **Editing a recurring task rebuilds its occurrences**, so changes made to single occurrences are lost (Project warns the same way). An occurrence that falls on a day off moves to the next working day; Project asks.
-48. **An inactive task still has dates**, from its own predecessors, so you can see where it would land. It just has no effect on anything else. Its own cost is shown but not totalled.
-49. **Dragging a card between swimlanes only changes its column.** Assignees and epics are changed in the ticket, by the epic drop target, or from the card's menu, so a drag never reassigns work by accident.
-50. **Grouped views list tasks without their outline, and leave out summary tasks** unless the filter picks nothing but summaries (Summary Tasks, say). A summary rolls up its own subtasks, so listing both double-counts; group totals only add up subtasks. Project can keep the outline inside groups ("Maintain hierarchy"); ProjectFCG doesn't.
-51. **In custom filters "And" binds tighter than "Or"**: *A And B Or C* is *(A And B) Or C*, as in most query languages. Dates compare by day (time of day ignored), numbers as they're shown (so $0.30 equals 0.1 + 0.2), and "NA" matches an empty date. A value that doesn't parse for its field is refused when you save the filter.
-52. **The current filter and group are per session, like the table; the custom filters themselves are saved in the file** (Project keeps both in the .mpp). Opening another file clears the highlight and the collapsed groups, which name the old file's things.
-53. **Date Range shows tasks under way at any time in the range** (start ≤ to, finish ≥ from). Project's Date Range asks for tasks that start or finish in it; a task spanning the whole range would be missed that way.
-54. **One release per story.** Jira allows several fix versions; the import keeps the first and lists the others. Epics and sub-tasks carry no release (an epic's size is its stories', and a sub-task ships with its parent).
-55. **A release's projected date is its milestone's finish when it has one, else the latest sprint end with unfinished stories.** The milestone includes anything else linked before it (QA, app store review), so it's the better forecast. With unplanned stories there's no projection, since nothing says when they'll be done.
-56. **The release date is copied to the milestone's Deadline when you set it** (and taken off when the release moves to another milestone or loses its date, if nobody changed it in between). Editing the deadline on the task doesn't change the release; edit the release.
-57. **The flow chart counts the sprint's current tickets.** Tickets carried out of a sprint when it was completed don't appear in its past days. Recording sprint membership over time would fix that; it's not worth the file size yet.
-58. **Copy Picture saves what's on screen** (Project's "For screen"); File ▸ Print (0.9) prints the whole plan.
-59. **Printing writes a PDF and hands it to your PDF viewer** rather than talking to printers directly. Every desktop's viewer prints well (and remembers the printer), and the same file can be mailed. Text uses the PDF's built-in Helvetica, so characters outside Western European ones print as "?"; embedding a font would fix it at the cost of a much bigger file.
-60. **The table on paper gets up to half the page width**: the view's columns in order until that fills (Task Name always). The timescale fits the whole plan, or the chosen dates, to the width that's left.
-61. **The project calendar stays one calendar, and task calendars are separate base calendars.** Resources keep inheriting from the project calendar. In Project any base calendar can be the project calendar; here you'd copy it instead.
-62. **One rule for which calendar a task works on, used everywhere.** The scheduler, typed and dragged finishes, actuals, % complete, earned value, the progress line, assignment dates, Resource Usage and leveling all measure a task on the same calendar: its own calendar ∩ each resource's (or just its own when it ignores resource calendars), or the resource's calendar, or the project's. For a task with several resources on different calendars, the single-number measures (actual finish → duration, % scheduled) use the first work resource's. In 0.9's first draft these places each worked it out for themselves and disagreed, which is what the review below caught.
-63. **Ten of each custom field type, not Project's 30 Text and 20 Number.** Values a Project XML file has in fields beyond those (and outline codes) are listed after import. Custom fields have no formulas or value lists yet, and summaries don't roll them up.
-64. **Delete with a whole row selected deletes the task.** Clicking the row number or a bar in the chart, Shift+Space or Select All selects whole rows; clicking a cell or moving with the arrow keys selects cells again.
-65. **AutoRecover writes a copy, never your file.** Project's *Auto Save* overwrites the project file itself every N minutes. That's risky when you're experimenting and expect to discard changes, so ProjectFCG keeps a separate recovery copy instead (Office's AutoRecover model) and deletes it on a normal close or save.
-66. **After an internal error the window keeps running, in steps.** First only transient state (open dialogs, a cell being edited, a drag) is dropped. If the error repeats on the next frame, the last plan that drew cleanly is restored, the undo history is cleared (its steps would no longer apply), and the view goes back to a plain Gantt Chart. After four in a row it writes a recovery copy and closes, rather than spinning. Edits that fail are undone by the copy `edit_project` already takes, so a failed edit costs nothing.
-67. **Dates are 1900–2200.** Project allows 1984–2149. A wider range keeps old and long-range plans working while staying far from where date arithmetic overflows. Typed dates outside it are refused; dates in files are clamped, with a note after a Project XML import.
-68. **Large plans level on a copy in the background** (1,500+ tasks, or 300+ with ALAP tasks), and nothing can be edited until it finishes or is cancelled, so the result never lands on a plan that changed meanwhile. Smaller plans level in place, as before.
-69. **Move Task and Sort follow Project.** Moving an auto-scheduled task sets *Start No Earlier Than* rather than changing the task's dependencies, so the move is visible and undoable in Task Information. A view sort leaves IDs alone, so links and "Task 12" still mean the same thing; only *Permanently renumber* changes them. A date constraint other than SNET keeps its type and moves its date: a finish constraint moves to the end of a working day. In a plan scheduled from its finish date, where tasks already sit as late as they can, moving a task earlier sets *Start No Later Than*, and typing a start or finish sets *Start/Finish No Later Than* (Project's rule).
-70. **Schedule from finish: the start is worked out, not stored as an input.** The backward pass hangs from the finish date, and the project start is the earliest late start. It settles in two passes because late dates almost never depend on the start. Tasks that were As Soon As Possible before the switch stay that way (as in Project); only new tasks are As Late As Possible. **Leveling such a plan** still delays tasks forward, keeping the start fixed while it works, so it can push the plan past its finish date (shown as negative slack). Project levels finish-scheduled plans backward; that's not done yet.
-71. **The Network Diagram lays itself out**, in columns by link order with summaries one column before their subtasks. Project lets you drag boxes; ProjectFCG doesn't yet, so the layout is recomputed whenever the plan changes and two people always see the same diagram.
-72. **The risk matrix's cells follow the guides, and you can recolour them.** The DoD guide gives its 5×5 matrix as a figure rather than a table. ProjectFCG uses the layout reproduced in DAU and service guidance: green down the minimal-consequence column, red only where likelihood and consequence are both high (L4–5 × C4–5 and L3 × C5), yellow between. Programs tailor theirs, so any cell can be recoloured (right-click). The custom colours belong to the register's standard and are reset when it changes. PMI's cells come from its P × I thresholds, and "no standard" uses L × I (Medium ≥ 5, High ≥ 15).
-73. **Issues are rated on consequence alone** (DoD: an issue has already happened): consequence 1–2 is Low, 3 Moderate, 4–5 High. Each consequence dimension (cost, schedule, performance) is rated separately and the worst sets the level, as both guides do. A rating entered under another standard keeps its worst level until you split it by dimension, so switching the standard never changes a risk silently.
-74. **Risk links to deleted tasks stay until the file is reopened.** Undoing a task's deletion should bring its risks' links back. So, while the plan is open, a link to a deleted task shows as "Task (deleted)". Opening the file drops links to things that are gone.
-
-## Not yet implemented (Roadmap)
-
-| Milestone | Scope |
-|---|---|
-| ~~Agile~~ | Board, sprints, backlog, burndown, velocity (0.5); epics, issue types, sub-tasks, links, labels, filters, Jira CSV (0.6); board ↔ Gantt dependencies, sprint lifecycle, columns, WIP limits, swimlanes (0.7); releases, cumulative flow (0.8). Still open: Jira REST sync, control chart / cycle time |
-| ~~Resources~~ | Done in 0.3. Still open: work contours, overtime, time-phased cost accrual, resource pools, Team Planner, generic/budget resources, leveling that splits tasks |
-| ~~Interop~~ | MSPDI XML import/export done in 0.6; task calendars and custom fields in 0.9; print/PDF in 0.9. Still open: `.mpp` reading, splits and outline codes in XML |
-| ~~Tracking~~ | Done in 0.6; slippage bars in 0.8; physical % complete in 0.10. Still open: actual work entered per assignment, time-phased actuals |
-| ~~Views~~ | Network Diagram and Calendar in 0.10. Still open: Team Planner, dragging boxes in the Network Diagram, a week/day Calendar. Risk register in 0.10; still open: Monte Carlo schedule risk, risk import from Excel |
-| Later | Drawings, custom field formulas and value lists, outline codes, multi-level groups, AutoFilter on column headers, split tasks, work weeks in calendars, a high-contrast theme, embedded fonts in PDFs |
-
-## Building from source
-
-```sh
-cargo test                          # 414 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, risk register, invariants, UI (headless)
-cargo test --release --test perf -- --ignored --nocapture   # timings on 500–5,000-task projects
-cargo run --release -- --sample
-./packaging/build-appimage.sh       # → dist/ProjectFCG-x86_64.AppImage
-```
-`build-appimage.sh` expects `appimagetool` and the static `runtime-x86_64` from
-the AppImage project in `../tools` (or set `APPIMAGETOOL` / `APPIMAGE_RUNTIME`).
-
-## Releases (GitHub Actions)
-
-`.github/workflows/release.yml` builds all three platforms when a release is
-published on GitHub, and attaches the files to it:
-
-1. Bump `version` in `Cargo.toml`, commit and push.
-2. **Releases ▸ Draft a new release**, create a tag such as `v0.7.0`, **Publish**.
-3. The workflow runs the tests, then builds three files in parallel, each
-   smoke-tested with `--self-test`:
-   * `ProjectFCG-v0.7.0-linux-x86_64.AppImage`: built on Ubuntu 22.04, so it
-     runs on any distribution from 2022 on. It carries its update
-     information (`gh-releases-zsync|AnonyMap|ProjectFCG|latest|ProjectFCG-*-linux-x86_64.AppImage.zsync`),
-     and a `.zsync` file is uploaded next to it. Gear Lever compares that
-     file's SHA-1 with the installed AppImage to see whether there's an update;
-     AppImageUpdate can use it to download only what changed. The build fails
-     if the update information is missing.
-   * `ProjectFCG-v0.7.0-windows-x86_64.exe`: a single file with the app icon.
-     There's no installer and nothing to unpack.
-   * `ProjectFCG-v0.7.0-macos-universal.dmg`: one app for Apple Silicon and
-     Intel Macs, macOS 11 or later. Drag it to Applications.
-
-If a build fails, fix it and run **Actions ▸ Release builds ▸ Run workflow**
-with the same tag; files already on the release are replaced. A tag that
-doesn't match `Cargo.toml` gets a warning, because the app reports the
-Cargo version.
-
-**Unsigned builds.** The Windows and Mac files aren't code-signed, which costs
-money: a Windows code-signing certificate, and Apple's $99/year Developer ID
-plus notarization. What that means for whoever downloads them:
-
-* Windows SmartScreen says "Windows protected your PC". Click **More info ▸ Run anyway**.
-* macOS says it "can't be opened because Apple cannot check it for malicious
-  software". On macOS 15, open **System Settings ▸ Privacy & Security** and
-  click **Open Anyway** (on older versions, right-click the app and choose
-  **Open**). Or run `xattr -dr com.apple.quarantine /Applications/ProjectFCG.app`.
-
-Both can be signed later by adding certificate secrets and a signing step to
-the workflow.
-
-**On Windows and macOS:** preferences are kept in `%APPDATA%\ProjectFCG`
-and `~/Library/Application Support/ProjectFCG`, and light/dark follows the
-system setting. Shortcuts written as Ctrl in this README are Cmd on a Mac.
-Double-clicking a `.pfcg` file doesn't open it there yet; use File ▸ Open.
-
-## Tests
-
-* `src/*` unit tests (57): CSV parsing (quotes, embedded newlines, BOM, `;` files), Jira dates and headers, ISO 8601 durations, MSPDI duration/lag format codes and day types, calendar arithmetic (including fast paths checked against a day-by-day reference), duration/lag parsing and formatting, date parsing, shortcut map, timescale presets, working-time parsing, sample project, risk matrices for each standard, theme contrast (every accent × mode against WCAG targets), dark-mode colour adaptation, desktop theme detection replies, preference migration.
-* `tests/invariants.rs`: 11 seeded randomized tests (the newest: 120 random projects with sprints, stories, board dependencies with % and day lags and inactive tasks, where the fast leveler must equal the reference, scheduling must be idempotent, and every task must start after the sprint it waits on) on generated projects (up to 200 tasks, all link types, lags, constraints, manual tasks, vacations, mixed task types). They check that links are honoured, slack matches critical, summaries roll up dates, work and cost, Work = Units × span, saving and loading is exact, scheduling is idempotent, 25 random edits undo and redo exactly, the fast leveler equals the reference on 80 projects (including selection-only leveling), and leveling clears every overallocation that is possible to clear.
-* `tests/scheduling.rs`: 46 behaviour tests whose expected dates were derived by hand from Project's rules (Standard calendar, project start Mon 1/5/2026). They cover all link types, lags and leads, constraints and conflicts, ALAP, deadlines, holidays, elapsed time, manual tasks, summaries, slack, editing operations, undo, file round-trip, and a 2,000-task performance check.
-* `tests/analysis.rs`: 12 tests for start drivers, multiple critical paths, start/finish slack, Task Path sets (including through summary links), Status/Late rollups, baselines, and loading 0.1.0 files.
-* `tests/resources.rs`: 23 tests for task types, effort-driven, Resource Names notation, resource calendars, costs, overallocation, usage, leveling (order, priority, within-slack, chains, selection), file round-trip, and 300 tasks leveled in under a second.
-* `tests/print.rs`: 4 tests: bar labels outside the printed dates, the sample on one page with its tasks, a 300-task plan on Letter, A4 and Tabloid with every row once and the page count right, and printing what the view shows (filter, groups, date range). Each PDF is checked with `qpdf --check` and read back with `pdftotext` where they're installed.
-* `tests/calendars.rs`: 12 tests: the same calendar for actual finish, % scheduled, assignments and Resource Usage, typed finishes on night shifts, ten-year exceptions intersected as ranges, pasting a task whose calendar was deleted, 24 Hours and Night Shift tasks, task ∩ resource calendars and ignoring resource calendars, exceptions of either calendar, names, deletes, summaries, repair, files, Project XML and undo, and the Change Working Time dialog's create / switch / delete.
-* `tests/custom_fields.rs`: 6 tests: full precision through Fill Down and Project XML, typed values and how they show, refusals, aliases, filters and groups on custom fields, files, undo, repair, and Project XML with Project's field IDs (and fields we don't hold reported).
-* `tests/core_regressions.rs`: 13 tests, one per finding of the 0.9 bug hunt.
-* `tests/safety.rs`: 5 tests: an edit that panics is undone and reported (the report never holds the plan); a frame that panics closes dialogs and the app keeps running; repeated panics go back to the last plan that drew, and give up after four; AutoRecover copies unsaved work in the background, removes it once saved, never offers a running window's copy, and the next start opens it as an unsaved plan; a normal close leaves nothing behind.
-* `tests/review_10.rs`: 9 tests, one per finding of the 0.10 review (recovery asking first and keeping its copy, rolling back a dialog's edit, concurrent and symlinked saves, Replace on dates, Move Task on finish constraints, typed dates in finish-scheduled plans, Fill Down when sorted, a woken window's copy).
-* `tests/fuzz_stability.rs`: four seeded, bounded fuzzing campaigns: random edits with extreme values, every app command plus random clicks and keys in every view (the Risk Register included), thousands of mutated `.pfcg`, Project XML and Jira CSV files, and calendar math. Nothing may panic, and no step may take over 20 s. Set `FUZZ_SCALE=20` for a long exploration run. `tests/fuzz_repros.rs` has one minimal test per crash the campaign found.
-* `tests/jobs.rs`: 2 tests: a large plan levels in the background with the same result as leveling in place, nothing else can change the plan meanwhile, and Cancel changes nothing.
-* `tests/project_tools.rs`: 6 tests: Sort with and without the outline, built-in sorts and back to ID; renumbering moving whole summaries with links intact; Find in any field both ways, opening collapsed summaries; Replace and Replace All (one undo step, all or nothing, Resource Names reassigning); Move Task on auto, manual, constrained, summary and started tasks; Physical % Complete in earned value, the default method, and Project XML.
-* `tests/from_finish.rs`: 4 tests: tasks hanging from the finish date with the start worked out, ASAP tasks starting with the project, negative slack when a task can't make the date, files, Project XML and undo.
-* `tests/risks.rs`: 12 tests: each standard's levels and scores for the same cell (DoD matrix, PMI P × I, L × I, issues), the worst dimension and per-risk standards, custom matrix colours, statements and EMV, links, IDs never reused and repair, files (and files from before the register), CSV, the sample's register, and the Risk Register view: looking at every risk under every standard changes nothing, edits are one undo step that Undo reloads, Insert and Delete act on risks, and Add Risk for Task.
-* `tests/task_views.rs`: 4 tests: Network Diagram columns following links and summaries (and surviving a loop), Calendar weeks, spans across week rows and lanes, and both views selecting a task on click and opening Task Information on double-click.
-* `tests/views.rs`: 14 tests: custom filters comparing durations, dates, money and text by type, And/Or precedence, Within, related summary rows, Date Range and Using Resource, Group By (built-in and by field, rollups, collapsing, with filters), saving, undo and validation, and the 0.8 review's findings.
-* `tests/releases.rs`: 10 tests: progress, projection and risk as stories move between sprints, what can carry a release, a milestone following its release (and the tasks linked to it), loops reported, releasing with carry-over, repairing files, Fix Version/s in Jira CSV, and the 0.8 review's findings.
-* `tests/board.rs`: 17 tests (including the sample's current sprint on every day of the week, and cumulative flow from recorded moves): starting and completing sprints (commitment, carry-over with sub-tasks, frozen velocity, reopening), editing columns (remapping, Done follows the last column); new sprints, ticket moves and ordering, done stamping, progress by points and by count, unestimated fallback, unmarking and deleting sprints, burndown, velocity and its average, assignees booking no work, file round-trip and loading 0.4 files, and the agile sample pinned to a fixed date.
-* `tests/tracking.rs`: 13 tests: % complete stamping actuals, an actual start pinning the task, actual finish, actual/remaining duration, Update Project through a date, Mark on Track at the status date, earned value worked by hand and rolled up, the three accrual rules, baselines 0–10, leveling leaving started tasks alone, progress-line points, and saving tracking data while loading 0.5 baselines.
-* `tests/epics.rs`: 14 tests: 60 seeded random sequences of board operations (add, move, retype, re-parent, link, unlink, delete, epic→task), checking after every step that the hierarchy rules hold and that undo/redo is exact, then a Jira export → import of the result; repairing hand-edited boards on load; epics outside sprints and their progress, sub-tasks following their parent and counting nothing, cascading deletes, links in both directions with cycle and duplicate checks, an epic driving a Gantt task, keys, and Jira CSV import (a realistic export with repeated Labels/Sprint columns, links and sub-tasks), sprint creation in natural order, renumbering on clashes, and a full export → import round trip.
-* `tests/mspdi.rs`: 10 tests: 4,500 randomly damaged XML files (bad numbers, dates, durations, truncation) and 200 damaged Jira CSVs, none of which may panic; a rich plan (all resource types, % and elapsed lags, manual task, baselines 0 and 3, progress, resource vacation) round-trips with identical dates, costs and assignments, and the second trip is byte-identical; units as Project writes them; **every element's order checked against the schema's sequences**; a Project-style file with the project summary task, yearly and "last Monday" recurring holidays, a cross-project link, a midnight shift and placeholder rows; and files written by a second MSPDI writer (MPXJ 16) from our samples.
-* `tests/dependencies.rs`: 12 tests: a task following its story's sprint (and moving with it), released at the done time, unplanned stories reported, epics, keys in the Predecessors text, loops refused or reported, stories waiting on tasks and planning conflicts, blockers planned later, deletes, files and undo, leveling, and the 0.7 review's findings.
-* `tests/recurring.rs`: 5 tests: weekly series on chosen days, editing in place (links and extra tasks survive), holidays, month-end and yearly dates, daily series over weekends, refusals, files, undo and XML.
-* `tests/inactive.rs`: 3 tests: no effect on successors, rollups, totals, resources or leveling; whole inactive phases; files and XML.
-* `tests/ui.rs`: 77 end-to-end tests (new in 0.9: Delete after clicking a bar) that drive the real app through egui's input pipeline (keystrokes, typing, clicks, double-clicks, bar and card drags) without a window. They include theme switching; every tab, view and dialog drawn in every theme; tracking tables and dialogs; real mouse drags of cards between columns, into and out of the backlog, onto an epic, and to a precise position; the filter bar; the ticket dialog with sub-tasks and links in one undo step; the Jira import dialog and export; Save as XML and opening XML; and a check that every symbol in the UI exists in the bundled fonts.
-* A third independent review, of the 0.8 code, found 11 problems, among them: undoing a filter's deletion applied a different filter, Shift+arrow selected the wrong tasks in a grouped view, a release's old milestone kept its deadline, and the flow chart was empty for imported tickets. All are fixed and pinned by `review_*` tests in `tests/views.rs` and `tests/releases.rs`.
-* Rendering the README screenshots turned up four more: the burndown's legend overlapped its axis, the status bar named a custom filter "Custom Filter", grouped views listed summary tasks under any filter, and over a weekend the flow chart never showed where tickets were.
-* A second independent review, of the 0.7 scheduler, board and recurring/inactive code, found 18 more. Among them: typing a key followed by non-ASCII text could crash, a sprint could be held up by its own finished story, leveling miscounted inactive tasks and board loops, and editing a recurring task dropped links to its occurrences. All are fixed and pinned by `review_regressions_0_7_*` tests and the randomized leveler check.
-* An independent review pass of the 0.6 import/export and board code found eight bugs (among them: Add Sub-task from a card failed, negated Jira statuses like "Not Done" landed in Done, derived MSPDI calendars lost to their base's exceptions, a sprint kept its % after its tickets left). All are fixed and pinned by `review_regressions_*` tests. The randomized board test caught a ninth (an epic could be retyped with itself as parent).
-* The AppImage was also exercised by hand under X11 (Xvfb + xdotool) and Wayland (headless Weston).
-
-## Layout
-
-```
-src/calendar.rs   working-time calendars & arithmetic
-src/duration.rs   durations, lags, Project text formats
-src/model.rs      tasks, links, constraints, project, date parsing
-src/schedule.rs   CPM scheduler (forward/backward pass, slack, rollups, start drivers, status)
-src/resources.rs  resources, assignments, task-type rules, costs, overallocation, usage
-src/leveling.rs   resource leveling (dependency-ordered, lazy forward pass)
-src/board.rs      Kanban tickets, issue types, epics, sub-tasks, links, sprints, progress, burndown, velocity, cumulative flow
-src/releases.rs   releases (fix versions): progress, projection, milestones
-src/risks.rs      risk register: risks/opportunities/issues, DoD and PMI scales, levels, matrix, CSV
-src/views.rs      custom filter definitions (saved in the file)
-src/calendars.rs  base calendars for tasks
-src/custom_fields.rs  Text/Number/Flag/Date/Cost custom fields
-src/pdf.rs        a small PDF writer (vector drawing, base-14 fonts)
-src/recovery.rs   atomic writes, AutoRecover files, crash reports (no window needed)
-src/sanitize.rs   values from files into range before scheduling
-src/recurring.rs  recurring task patterns and occurrences
-src/tracking.rs   actuals, Update Project, Mark on Track, earned value
-src/jira.rs       Jira CSV import/export (CSV parser, field mapping)
-src/mspdi.rs      Microsoft Project XML (MSPDI) import/export
-src/analysis.rs   task paths, critical tasks, baselines
-src/format.rs     bar styles, text styles, gridlines, layout, timescale (saved in file)
-src/ops.rs        editing operations (insert, indent, link, cell edits …)
-src/history.rs    undo/redo
-src/io.rs         .pfcg JSON and CSV export
-src/app/          egui front end (ribbon, table, gantt, bars, timeline, inspector, dialogs,
-                  resource sheet, usage views, resource dialogs, themes, system theme detection,
-                  board view, tracking and import dialogs, filters and groups, release dialogs, print,
-                  safety (caught panics, AutoRecover), jobs (background leveling), sort, find/replace,
-                  move tasks, network diagram, calendar view, risk register)
-examples/xmldump.rs  writes the samples as MS Project XML (for checking with other tools)
-examples/screens.rs  renders the README screenshots (`xvfb-run cargo run --release --example screens -- docs board`)
-examples/profile.rs  profiling driver (callgrind: `cargo build --profile profiling --example profile`)
-packaging/        icons (.png/.svg/.ico/.icns), desktop entry, AppRun, AppImage build script, macOS Info.plist
-.github/workflows/release.yml  builds the AppImage, .exe and .dmg for each GitHub release
-build.rs          embeds the icon in the Windows .exe
-```
-
-License: MIT.
+MIT. See [LICENSE](LICENSE).

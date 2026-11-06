@@ -159,7 +159,7 @@ fn move_task_moves_finish_constraints_as_finishes() {
     assert_eq!(app.project.tasks[0].constraint_date, Some(dt(1, 12, 17)), "back 2 days: Mon 5 PM");
 }
 
-/// 7 (and the README's Project behaviour): in a plan scheduled from its
+/// 7 (and docs/DECISIONS.md decision 69's Project behaviour): in a plan scheduled from its
 /// finish, a typed start or finish is a latest date.
 #[test]
 fn typed_dates_in_a_finish_scheduled_plan_are_no_later_than() {

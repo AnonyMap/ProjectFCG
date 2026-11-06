@@ -164,7 +164,7 @@ fn paste_creates_invalid_link() {
     assert!(app.project.calc.errors.is_empty(), "{:?}", app.project.calc.errors);
 }
 
-// 7. Delete key in the Duration column deletes the whole task (README decision 5 says reset)
+// 7. Delete key in the Duration column deletes the whole task (docs/DECISIONS.md decision 5 says reset)
 #[test]
 fn delete_key_in_duration_column() {
     let mut p = proj();
