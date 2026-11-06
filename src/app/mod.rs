@@ -2674,6 +2674,7 @@ impl eframe::App for ProjectFcgApp {
 /// Entry point used by `main.rs`.
 /// `sample`: None = blank project, Some(false) = the classic sample,
 /// Some(true) = the agile (sprints + board) sample.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
