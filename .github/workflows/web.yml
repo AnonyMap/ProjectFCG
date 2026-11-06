@@ -3,14 +3,15 @@
 # needed. index.html is the same file, for hosting. Download it from the
 # run's artifacts or the web-build branch.
 #
-# Runs on pushes to the web-spike branch, or by hand: Actions ▸ Web build
-# ▸ Run workflow.
+# Runs on every push to main (the web-build branch always holds the latest
+# file), or by hand: Actions ▸ Web build ▸ Run workflow. Releases build it
+# themselves (release.yml).
 
 name: Web build
 
 on:
   push:
-    branches: [web-spike]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

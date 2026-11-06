@@ -1,6 +1,6 @@
 # ProjectFCG
 
-A desktop project scheduler for Linux, Windows and macOS whose scheduling engine follows Microsoft Project's rules. It also has a Jira-style board for teams that plan in sprints, and a risk register. It is free, open source (MIT) and saves to an open JSON format.
+A project scheduler for Linux, Windows, macOS and the browser whose scheduling engine follows Microsoft Project's rules. It also has a Jira-style board for teams that plan in sprints, and a risk register. It is free, open source (MIT) and saves to an open JSON format.
 
 *FCG* stands for Fast, Cheap, Good: pick two.
 
@@ -31,6 +31,16 @@ Download the latest file for your system from the [Releases page](https://github
 
 - Open `ProjectFCG-…-macos-universal.dmg` and drag the app to Applications. It runs on Apple Silicon and Intel, macOS 11 or later.
 - It isn't notarized, so the first time you open it, go to **System Settings ▸ Privacy & Security ▸ Open Anyway**.
+
+**In a browser, with nothing to install**
+
+- Download `ProjectFCG-…-web.html` and double-click it. It opens in Chrome or Edge straight from disk, with no web server and no internet connection. It's the whole app in one 5 MB file, so it works where installing software isn't allowed.
+- **Saving works as on the desktop.** Ctrl+S writes back to the file you opened (Chrome asks once per file for permission to save to it). Unsaved work is kept in the browser and offered back if the tab closes, and closing the tab with unsaved changes asks first.
+- **What's different:**
+  - Ctrl+N, Ctrl+W and Ctrl+T belong to the browser, so use File ▸ New.
+  - Very large plans pause the page while they level.
+  - In Firefox and Safari, Save downloads a copy instead of updating the file.
+- More detail is in [web/README.md](web/README.md).
 
 **From source**
 
@@ -210,7 +220,7 @@ Undo (Ctrl+Z) covers every edit. **F1** lists all keyboard shortcuts, which are 
 
 **Structure.** The scheduling engine (`src/*.rs`) is a library with no user interface: calendars, the critical-path scheduler, resources and leveling, tracking, the board, risks, and file formats. The desktop app (`src/app/`) sits on top of it. That separation is what lets the tests drive the engine directly and the real interface without a window.
 
-**How correctness is checked.** 414 automated tests run on every release:
+**How correctness is checked.** 418 automated tests run on every release:
 
 - **Hand-derived expectations:** scheduling tests whose dates were worked out by hand from Project's rules.
 - **Reference implementations:** the fast calendar arithmetic and the fast leveler are compared with slow, obviously-correct versions on thousands of random cases.

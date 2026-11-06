@@ -5,7 +5,7 @@ Building, testing and releasing ProjectFCG, and where the code lives. See also [
 ## Building from source
 
 ```sh
-cargo test                          # 414 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, risk register, invariants, UI (headless)
+cargo test                          # 418 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, risk register, invariants, UI (headless)
 cargo test --release --test perf -- --ignored --nocapture   # timings on 500–5,000-task projects
 cargo run --release -- --sample
 ./packaging/build-appimage.sh       # → dist/ProjectFCG-x86_64.AppImage
@@ -58,6 +58,16 @@ the workflow.
 and `~/Library/Application Support/ProjectFCG`, and light/dark follows the
 system setting. Shortcuts written as Ctrl in the README are Cmd on a Mac.
 Double-clicking a `.pfcg` file doesn't open it there yet; use File ▸ Open.
+
+## Web build
+
+The same code compiles to WebAssembly (`cargo build --release --target wasm32-unknown-unknown`).
+
+- **Bundling:** `web/bundle.py` packs the result, wasm-bindgen's `no-modules` loader and the browser shim `web/pfcg.js` into one HTML file that runs from disk.
+- **Browser-only code** lives in `src/app/web.rs`, behind `#[cfg(target_arch = "wasm32")]`. That covers files, storage, AutoRecover, the tab title and the unsaved-changes warning.
+- **Builds:** `.github/workflows/web.yml` builds it on every push to `main` and keeps the latest on the `web-build` branch, and the release workflow attaches it to each release.
+
+See [web/README.md](../web/README.md) for how saving works and what differs from the desktop app.
 
 ## Roadmap (not yet implemented)
 

@@ -2,6 +2,35 @@
 
 What each version added, newest first, with the bugs that reviews and fuzzing found along the way. The [README](../README.md) describes the app as it is now.
 
+## 0.11: ProjectFCG in a browser
+
+**The web build**
+
+- **One file:** the whole app compiles to WebAssembly and is packed into a single `ProjectFCG-…-web.html` (about 5 MB). It runs when double-clicked, from disk, in Chrome or Edge, with no server, install or network. The scheduling engine is the desktop one, so it computes the same dates.
+- **Saving:**
+  - In Chrome and Edge, Open and Save As use the system file dialogs, and Save writes back to the same file. Chrome swaps the file in only when the write is complete.
+  - Elsewhere, Open uploads a file and Save downloads a copy.
+  - AutoRecover keeps unsaved work in browser storage 10 seconds after a change and offers it back next time.
+  - Closing a tab with unsaved changes asks first.
+- **Everything else carries over:**
+  - Print opens the PDF in a new tab.
+  - Exports, Copy Picture and Jira and Project XML imports work, as do dropped files, the clipboard, preferences, and dark mode.
+- **Keys:** the page claims Project's keys from the browser: F1–F10, F12, Ctrl+F/H/G/D/−/=/0 and Alt+arrows/Home/End.
+- **Releases** now carry the web file next to the AppImage, .exe and .dmg.
+
+**Tested in Chromium, from disk:**
+- every view and dialog;
+- typing, undo and redo;
+- the clipboard;
+- every export and import, Print and Copy Picture;
+- drag and drop, the mouse (context menu, wheel, double-click, dragging bars) and preferences across reloads;
+- a 2,000-task plan: it opens in about 0.2 s, runs at 60 fps, and AutoRecover keeps its 3.5 MB.
+
+**Bugs the browser testing found, also on the desktop:**
+- **Tab out of a cell, then typing, lost the typing.** egui moved its keyboard focus to another widget on Tab. The table now takes focus back. Shift+Tab saved the edit without moving back a column; it now moves.
+- **Typing a value and Enter quickly** (or on a slow frame) opened the editor but gave Enter to the table. The selection moved and the value was never saved; a task name typed and tabbed out of was lost the same way. Keys that arrive in the same frame as the first character now go to the new editor. This applies in the task table and the Resource Sheet.
+- **Web only:** Ctrl+X/C/V ran twice, once for the key and once for the browser's clipboard event. Paste inserted the rows twice, and Cut would have cut two things.
+
 ## 0.10: stability, Network Diagram, Calendar, sort, find and replace, schedule from finish, risk register
 
 **Stability**
