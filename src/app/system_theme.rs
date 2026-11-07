@@ -11,7 +11,8 @@
 
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 const UNKNOWN: u8 = 0;
 const LIGHT: u8 = 1;

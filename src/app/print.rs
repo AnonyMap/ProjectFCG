@@ -428,6 +428,14 @@ impl ProjectFcgApp {
 
     /// Write the PDF and open it in the system viewer, from where it prints.
     pub fn print_now(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        return self.web_print();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.print_now_native();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn print_now_native(&mut self) {
         let pdf = print_pdf(self, &self.print_options);
         let name: String = self.project.title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
         let path = std::env::temp_dir().join(format!("{} - print.pdf", name.trim()));

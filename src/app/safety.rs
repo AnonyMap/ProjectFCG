@@ -23,7 +23,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// After this many panicking frames in a row, give up.
 pub const GIVE_UP_AFTER: u32 = 4;

@@ -210,7 +210,8 @@ fn file_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         if big(ui, "⚙", "Options", "Scheduling options", true) {
             app.execute(Command::Options, &ctx);
         }
-        if big(ui, "🚪", "Exit", "Close ProjectFCG (Ctrl+Q)", true) {
+        // (a web page can't close its own tab)
+        if !cfg!(target_arch = "wasm32") && big(ui, "🚪", "Exit", "Close ProjectFCG (Ctrl+Q)", true) {
             app.execute(Command::Quit, &ctx);
         }
     });

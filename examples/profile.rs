@@ -1,4 +1,5 @@
 //! Profiling driver: `cargo run --release --example profile -- schedule|level [tasks]`
+//! (`save TASKS FILE` writes the random plan to FILE, to load elsewhere)
 #[path = "../tests/common/mod.rs"]
 mod common;
 
@@ -8,6 +9,13 @@ fn main() {
     let mut p = common::random_project(7, &common::Shape { tasks: n, resources: n / 50, ..Default::default() });
     let t0 = std::time::Instant::now();
     match what.as_str() {
+        "save" => {
+            projectfcg::schedule::schedule(&mut p);
+            let path = std::env::args().nth(3).expect("save TASKS FILE");
+            projectfcg::io::save(&p, std::path::Path::new(&path)).expect("saved");
+            eprintln!("wrote {} tasks to {path}", p.tasks.len());
+            return;
+        }
         "schedule" => {
             for _ in 0..5 {
                 projectfcg::schedule::schedule(&mut p);

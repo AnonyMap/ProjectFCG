@@ -1,0 +1,65 @@
+# The web build (experimental): ProjectFCG compiled to WebAssembly, as one
+# HTML file (ProjectFCG.html) that runs when opened from disk, no server
+# needed. index.html is the same file, for hosting. Download it from the
+# run's artifacts or the web-build branch.
+#
+# Runs on every push to main (the web-build branch always holds the latest
+# file), or by hand: Actions ▸ Web build ▸ Run workflow. Releases build it
+# themselves (release.yml).
+
+name: Web build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # push the built site to the web-build branch
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  web:
+    name: WebAssembly
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --target wasm32-unknown-unknown --bin projectfcg
+      - name: wasm-bindgen (the version Cargo.lock uses)
+        run: |
+          v=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          echo "wasm-bindgen $v"
+          if curl -sSLf "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$v/wasm-bindgen-$v-x86_64-unknown-linux-musl.tar.gz" -o wb.tgz && tar xzf wb.tgz; then
+            sudo mv "wasm-bindgen-$v-x86_64-unknown-linux-musl/wasm-bindgen" /usr/local/bin/
+          else
+            cargo install --locked wasm-bindgen-cli --version "$v"
+          fi
+          wasm-bindgen --version
+      - name: Package (one HTML file)
+        run: |
+          mkdir -p build dist
+          wasm-bindgen --target no-modules --no-typescript --out-dir build --out-name projectfcg target/wasm32-unknown-unknown/release/projectfcg.wasm
+          python3 web/bundle.py build
+          cp build/ProjectFCG.html dist/ProjectFCG.html
+          cp build/ProjectFCG.html dist/index.html
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: projectfcg-web
+          path: dist
+      # the built site on its own branch too (git reaches places artifact
+      # downloads don't); serve it with any static server to try it
+      - name: Push to the web-build branch
+        run: |
+          cd dist
+          git init -q -b web-build
+          git add -A
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -qm "Web build of ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" web-build

@@ -35,6 +35,8 @@ pub mod theme;
 pub mod timeline;
 pub mod tracking_dialogs;
 pub mod view_dialogs;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 
 use crate::history::History;
 use crate::model::{fmt_date, Project, Task, TaskMode};
@@ -77,6 +79,9 @@ pub struct CellEdit {
     pub focus_requested: bool,
     pub select_all: bool,
     pub picker_open: bool,
+    /// Tab (Some(shift)) was pressed while editing: where to go once the
+    /// edit is saved, which can be a frame later.
+    pub tab: Option<bool>,
 }
 
 /// Copy Picture: the screenshot is asked for, arrives a frame later, and
@@ -229,6 +234,8 @@ pub enum PendingAction {
     OpenPath(PathBuf),
     /// A recovery copy offered at start (index into the offers).
     OpenRecovered(usize),
+    /// A file dropped onto the web page: its name and contents.
+    OpenBytes(String, Vec<u8>),
     Quit,
 }
 
@@ -280,6 +287,9 @@ pub struct ProjectFcgApp {
     pub pending: Option<PendingAction>,
     /// Action to run at the start of next frame (e.g. quit after Save As).
     pub deferred_action: Option<PendingAction>,
+    /// Tab ended a cell edit: take keyboard focus back from the widget egui
+    /// gave it to (see table.rs).
+    pub reclaim_focus: bool,
     pub splitter_drag: bool,
     pub use_portal: bool,
     /// Rows area height from last frame (for page up/down and scrolling).
@@ -312,6 +322,10 @@ pub struct ProjectFcgApp {
     pub network: network::NetworkState,
     pub calendar: calendar_view::CalendarState,
     pub risk_view: risk_view::RiskViewState,
+    #[cfg(target_arch = "wasm32")]
+    pub web: web::WebState,
+    #[cfg(target_arch = "wasm32")]
+    pub web_ctx: Option<egui::Context>,
 }
 
 impl Default for ProjectFcgApp {
@@ -370,6 +384,7 @@ impl ProjectFcgApp {
             file_browser: None,
             pending: None,
             deferred_action: None,
+            reclaim_focus: false,
             splitter_drag: false,
             use_portal: std::env::var_os("PROJECTFCG_NO_PORTAL").is_none(),
             rows_view_h: 400.0,
@@ -392,6 +407,10 @@ impl ProjectFcgApp {
             network: Default::default(),
             calendar: Default::default(),
             risk_view: Default::default(),
+            #[cfg(target_arch = "wasm32")]
+            web: Default::default(),
+            #[cfg(target_arch = "wasm32")]
+            web_ctx: None,
         };
         app.scroll_gantt_to(app.project.start);
         if let Some(t) = app.project.tasks.first() {
@@ -696,6 +715,12 @@ impl ProjectFcgApp {
         fresh.prefs_path = self.prefs_path.clone();
         fresh.board.show_charts = self.board.show_charts;
         fresh.board.backlog_open = self.board.backlog_open;
+        #[cfg(target_arch = "wasm32")]
+        {
+            fresh.web = std::mem::take(&mut self.web);
+            fresh.web.reset_for_new_plan(fresh.path.is_some());
+            fresh.web_ctx = self.web_ctx.clone();
+        }
         // the window's crash safety carries over; what it knew about the
         // old plan doesn't
         fresh.safety = std::mem::take(&mut self.safety);
@@ -703,6 +728,25 @@ impl ProjectFcgApp {
         let start = fresh.project_span().0;
         fresh.scroll_gantt_to(start);
         *self = fresh;
+    }
+
+    /// A file's contents without a path (dropped onto the web page): a
+    /// plan or Project XML. Save will ask where to save it.
+    pub fn open_bytes(&mut self, name: String, bytes: Vec<u8>) {
+        #[cfg(target_arch = "wasm32")]
+        self.web_dropped(name, bytes);
+        #[cfg(not(target_arch = "wasm32"))]
+        match String::from_utf8(bytes) {
+            Ok(text) if name.to_lowercase().ends_with(".xml") => self.open_xml_text(&text, &name),
+            Ok(text) => match crate::io::from_json(&text) {
+                Ok(p) => {
+                    self.replace_project(p, None);
+                    self.set_status(format!("Opened {name}"));
+                }
+                Err(e) => self.error(e),
+            },
+            Err(_) => self.error(format!("{name} isn't a ProjectFCG or Project XML file.")),
+        }
     }
 
     pub fn open_path(&mut self, path: PathBuf) {
@@ -718,7 +762,22 @@ impl ProjectFcgApp {
         }
     }
 
+    /// Save to `path`. In the browser the path is ignored: the plan goes
+    /// back to the file it was opened from (asynchronously, so this
+    /// returns false and the save's result arrives later).
     pub fn save_to(&mut self, path: PathBuf) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = path;
+            self.web_save();
+            return false;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.save_to_path(path)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_to_path(&mut self, path: PathBuf) -> bool {
         let path = if path.extension().is_none() {
             path.with_extension(crate::io::EXTENSION)
         } else {
@@ -775,6 +834,7 @@ impl ProjectFcgApp {
             PendingAction::Open => self.pick_open(),
             PendingAction::OpenPath(p) => self.open_path(p),
             PendingAction::OpenRecovered(i) => self.open_recovered_now(i),
+            PendingAction::OpenBytes(name, bytes) => self.open_bytes(name, bytes),
             PendingAction::Quit => {
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -788,8 +848,16 @@ impl ProjectFcgApp {
 
     /// Pick an existing file: a project to open, or a file to import.
     pub fn pick_open_for(&mut self, mode: filebrowser::Mode) {
+        #[cfg(target_arch = "wasm32")]
+        self.web_open(if mode == filebrowser::Mode::ImportJiraCsv { web::OpenKind::JiraCsv } else { web::OpenKind::Project });
+        #[cfg(not(target_arch = "wasm32"))]
+        self.pick_open_native(mode);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pick_open_native(&mut self, mode: filebrowser::Mode) {
         if self.use_portal {
-            let t0 = std::time::Instant::now();
+            let t0 = web_time::Instant::now();
             let d = rfd::FileDialog::new();
             let d = if mode == filebrowser::Mode::ImportJiraCsv {
                 d.set_title("Import Jira CSV").add_filter("CSV", &["csv"])
@@ -818,6 +886,17 @@ impl ProjectFcgApp {
     }
 
     pub fn pick_save(&mut self, purpose: filebrowser::Mode) {
+        #[cfg(target_arch = "wasm32")]
+        match purpose {
+            filebrowser::Mode::SaveAs => self.web_save_as(),
+            p => self.web_export(p),
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.pick_save_native(purpose);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pick_save_native(&mut self, purpose: filebrowser::Mode) {
         let (ext, filter_name, default_name) = match purpose {
             filebrowser::Mode::ExportCsv => ("csv", "CSV", format!("{}.csv", self.project.title)),
             filebrowser::Mode::ExportJiraCsv => ("csv", "CSV", format!("{} - Jira.csv", self.project.title)),
@@ -832,7 +911,7 @@ impl ProjectFcgApp {
             ),
         };
         if self.use_portal {
-            let t0 = std::time::Instant::now();
+            let t0 = web_time::Instant::now();
             let picked = rfd::FileDialog::new()
                 .set_title(match purpose {
                     filebrowser::Mode::SaveAs => "Save As",
@@ -1747,6 +1826,9 @@ impl ProjectFcgApp {
     }
 
     pub fn save_prefs(&self) {
+        #[cfg(target_arch = "wasm32")]
+        web::save_prefs(&self.prefs);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(p) = &self.prefs_path {
             let _ = self.prefs.save(p);
         }
@@ -1942,6 +2024,7 @@ impl ProjectFcgApp {
             focus_requested: false,
             select_all,
             picker_open: false,
+            tab: None,
         });
     }
 
@@ -2065,6 +2148,11 @@ impl ProjectFcgApp {
             self.themed = true;
         }
         self.update_palette(&ctx);
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.web_poll(&ctx);
+            self.web_recovery_dialog(&ctx);
+        }
         if let Some(a) = self.deferred_action.take() {
             self.run_pending(a, &ctx);
         }
@@ -2075,12 +2163,25 @@ impl ProjectFcgApp {
             self.pending = Some(PendingAction::Quit);
             self.dialogs.save_prompt = true;
         }
-        // Files dropped onto the window open like File ▸ Open.
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
-        if let Some(p) = dropped.into_iter().next() {
-            self.guarded(PendingAction::OpenPath(p), &ctx);
+        // Files dropped onto the window open like File ▸ Open (in a
+        // browser they're read first: see web.rs).
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+            if let Some(p) = dropped.into_iter().next() {
+                self.guarded(PendingAction::OpenPath(p), &ctx);
+            }
         }
+        #[cfg(target_arch = "wasm32")]
+        self.web_read_dropped(&ctx);
 
+        if std::mem::take(&mut self.reclaim_focus) {
+            ctx.memory_mut(|m| {
+                if let Some(f) = m.focused() {
+                    m.surrender_focus(f);
+                }
+            });
+        }
         self.handle_keyboard(&ctx);
         self.update_title(&ctx);
         // Copy Picture: the screenshot asked for last frame
@@ -2331,6 +2432,22 @@ impl ProjectFcgApp {
         for ev in events {
             match ev {
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                    // a cell editor opened by a character typed earlier in
+                    // this frame: Enter/Tab/Esc are its, not the sheet's
+                    if self.view.main == MainView::ResourceSheet && self.sheet.edit.is_some() {
+                        let back = if modifiers.shift { -1 } else { 1 };
+                        match key {
+                            egui::Key::Enter if self.res_commit_edit() => self.res_move(back, 0),
+                            egui::Key::Tab if self.res_commit_edit() => self.res_move(0, back),
+                            egui::Key::Escape => self.sheet.edit = None,
+                            _ => {}
+                        }
+                        self.reclaim_focus |= *key == egui::Key::Tab;
+                        continue;
+                    }
+                    if self.view.main == MainView::ResourceSheet {
+                        self.reclaim_focus |= *key == egui::Key::Tab;
+                    }
                     if let Some(cmd) = commands::shortcut(*key, *modifiers) {
                         self.execute(cmd, ctx);
                         continue;
@@ -2407,6 +2524,23 @@ impl ProjectFcgApp {
                     modifiers,
                     ..
                 } => {
+                    // A character typed earlier in this frame opened a cell
+                    // editor (fast typing, or a slow frame): the keys after
+                    // it are the editor's, so Enter saves the value instead
+                    // of only moving, as it would once the editor has focus.
+                    if self.edit.is_some() {
+                        let back = if modifiers.shift { -1 } else { 1 };
+                        match key {
+                            egui::Key::Enter if self.commit_edit() => self.move_active(back, 0, false),
+                            egui::Key::Tab if self.commit_edit() => self.move_active(0, back, false),
+                            egui::Key::Escape => self.cancel_edit(),
+                            _ => {}
+                        }
+                        self.reclaim_focus |= key == egui::Key::Tab;
+                        continue;
+                    }
+                    // Tab moves between cells here, not between egui's widgets
+                    self.reclaim_focus |= key == egui::Key::Tab;
                     if let Some(cmd) = commands::shortcut(key, modifiers) {
                         self.execute(cmd, ctx);
                         continue;
@@ -2588,6 +2722,7 @@ impl eframe::App for ProjectFcgApp {
 /// Entry point used by `main.rs`.
 /// `sample`: None = blank project, Some(false) = the classic sample,
 /// Some(true) = the agile (sprints + board) sample.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

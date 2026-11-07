@@ -307,6 +307,12 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Command> {
     let ctrl = m.ctrl || m.command;
     let alt = m.alt;
     let shift = m.shift;
+    // In a browser, Ctrl+X/C/V also arrive as the browser's cut, copy and
+    // paste events (the only way to reach the clipboard there), which run
+    // the command: the key itself must not run it a second time.
+    if cfg!(target_arch = "wasm32") && ctrl && !alt && !shift && matches!(key, Key::X | Key::C | Key::V) {
+        return None;
+    }
     Some(match (ctrl, alt, shift, key) {
         // File
         (true, false, false, Key::N) => New,

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProjectFCG</title>
+  <!-- ProjectFCG {{VERSION}}: the whole app in one file. Open it in Chrome or
+       Edge (double-click it, or drag it into a window); no web server needed.
+       Source: https://github.com/AnonyMap/ProjectFCG (MIT license). -->
+  <link rel="icon" href="data:image/svg+xml;base64,{{ICON}}">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f4f5f7; }
+    @media (prefers-color-scheme: dark) { html, body { background: #1e1f22; color: #ddd; } }
+    canvas#projectfcg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+    #loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+               font: 15px system-ui, sans-serif; color: #666; }
+  </style>
+</head>
+<body>
+  <canvas id="projectfcg"></canvas>
+  <div id="loading"><p>Loading ProjectFCG…</p></div>
+  <script>
+{{PFCG_JS}}
+  </script>
+  <script>
+{{GLUE_JS}}
+  </script>
+  <!-- the app (WebAssembly, gzip, base64) -->
+  <script type="application/octet-stream" id="pfcg-wasm">{{WASM}}</script>
+  <script>
+  (async () => {
+    const fail = (msg) => {
+      document.getElementById('loading').innerHTML = '<p>ProjectFCG couldn’t start.</p><p style="font-size:13px;max-width:560px;text-align:center">' + msg + '</p>';
+    };
+    if (!('DecompressionStream' in window) || !window.WebGL2RenderingContext) {
+      return fail('This browser is too old for it: use a current Chrome or Edge.');
+    }
+    try {
+      const b64 = document.getElementById('pfcg-wasm').textContent;
+      const raw = atob(b64);
+      const gz = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) gz[i] = raw.charCodeAt(i);
+      const wasm = await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+      await wasm_bindgen({ module_or_path: wasm });
+    } catch (e) {
+      fail(String(e));
+    }
+  })();
+  </script>
+</body>
+</html>

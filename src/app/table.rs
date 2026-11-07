@@ -860,10 +860,13 @@ fn show_editor(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rows: &[DisplayRow], 
         )
     });
 
+    let mut tab_dir = tab.then_some(shift);
     if let Some(e) = app.edit.as_mut() {
         e.text = text.clone();
         e.focus_requested = true;
         e.picker_open = picker_open;
+        e.tab = tab_dir.or(e.tab);
+        tab_dir = e.tab;
     }
     if let Some(v) = picked {
         if let Some(e) = app.edit.as_mut() {
@@ -888,9 +891,14 @@ fn show_editor(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rows: &[DisplayRow], 
         if app.commit_edit() {
             if enter {
                 app.move_active(if shift { -1 } else { 1 }, 0, false);
-            } else if tab {
-                app.move_active(0, if shift { -1 } else { 1 }, false);
+            } else if let Some(back) = tab_dir {
+                app.move_active(0, if back { -1 } else { 1 }, false);
             }
+        }
+        // Tab also moves egui's keyboard focus on to the next widget; the
+        // table takes it back next frame, so typing goes into the next cell
+        if tab_dir.is_some() {
+            app.reclaim_focus = true;
         }
     }
 }
@@ -1059,5 +1067,6 @@ pub fn start_edit_at(app: &mut ProjectFcgApp, row: RowRef, col: usize, text: &st
         focus_requested: false,
         select_all: false,
         picker_open: false,
+        tab: None,
     });
 }
