@@ -7,7 +7,8 @@
 #   3. A few minutes later the four downloads appear on the release.
 #
 # To rebuild an existing release (say a build failed): Actions ▸ Release
-# builds ▸ Run workflow, and give the tag.
+# builds ▸ Run workflow, give the tag, and pick the platform to rebuild
+# (or all). "Upload" = no builds and tests without touching the release.
 
 name: Release builds
 
@@ -19,6 +20,16 @@ on:
       tag:
         description: Tag of an existing release to build and upload to (e.g. v0.7.0)
         required: true
+      only:
+        description: Which build to run
+        type: choice
+        options: [all, linux, windows, macos, web]
+        default: all
+      upload:
+        description: Upload to the release (no = build and test only)
+        type: choice
+        options: ["yes", "no"]
+        default: "yes"
 
 permissions:
   contents: write # upload files to the release
@@ -52,6 +63,7 @@ jobs:
   linux:
     name: Linux AppImage
     needs: test
+    if: inputs.only == '' || inputs.only == 'all' || inputs.only == 'linux'
     # The oldest supported Ubuntu, so the AppImage runs on older glibc too.
     runs-on: ubuntu-22.04
     steps:
@@ -90,11 +102,12 @@ jobs:
           cp dist/ProjectFCG-x86_64.AppImage "$out"
           # made after renaming, so the file it points to is the release asset
           zsyncmake -u "$out" -o "$out.zsync" "$out"
-          gh release upload "$TAG" "$out" "$out.zsync" --clobber
+          if [ "${{ inputs.upload }}" != "no" ]; then gh release upload "$TAG" "$out" "$out.zsync" --clobber; fi
 
   windows:
     name: Windows exe
     needs: test
+    if: inputs.only == '' || inputs.only == 'all' || inputs.only == 'windows'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -114,12 +127,15 @@ jobs:
         run: |
           out="ProjectFCG-${TAG}-windows-x86_64.exe"
           cp target/release/projectfcg.exe "$out"
-          gh release upload "$TAG" "$out" --clobber
+          if [ "${{ inputs.upload }}" != "no" ]; then gh release upload "$TAG" "$out" --clobber; fi
 
   macos:
     name: macOS dmg
     needs: test
-    runs-on: macos-14
+    if: inputs.only == '' || inputs.only == 'all' || inputs.only == 'macos'
+    # macos-14 machines were retired in Nov 2026 (jobs on them were
+    # cancelled before starting)
+    runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
@@ -156,11 +172,13 @@ jobs:
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
+        if: inputs.upload != 'no'
         run: gh release upload "$TAG" "ProjectFCG-${TAG}-macos-universal.dmg" --clobber
 
   web:
     name: Web (one HTML file)
     needs: test
+    if: inputs.only == '' || inputs.only == 'all' || inputs.only == 'web'
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -189,4 +207,4 @@ jobs:
           python3 web/bundle.py build
           out="ProjectFCG-${TAG}-web.html"
           cp build/ProjectFCG.html "$out"
-          gh release upload "$TAG" "$out" --clobber
+          if [ "${{ inputs.upload }}" != "no" ]; then gh release upload "$TAG" "$out" --clobber; fi
