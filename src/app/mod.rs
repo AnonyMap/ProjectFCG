@@ -25,6 +25,7 @@ pub mod resource_dialogs;
 pub mod resource_sheet;
 pub mod risk_view;
 pub mod tell_me;
+pub mod item_search;
 pub mod safety;
 pub mod usage;
 pub mod ribbon;
@@ -325,6 +326,8 @@ pub struct ProjectFcgApp {
     pub risk_view: risk_view::RiskViewState,
     /// Search (Alt+Q).
     pub tell_me: tell_me::TellMe,
+    /// Search the plan (Ctrl+E).
+    pub item_search: item_search::ItemSearch,
     #[cfg(target_arch = "wasm32")]
     pub web: web::WebState,
     #[cfg(target_arch = "wasm32")]
@@ -411,6 +414,7 @@ impl ProjectFcgApp {
             calendar: Default::default(),
             risk_view: Default::default(),
             tell_me: Default::default(),
+            item_search: Default::default(),
             #[cfg(target_arch = "wasm32")]
             web: Default::default(),
             #[cfg(target_arch = "wasm32")]
@@ -2191,6 +2195,11 @@ impl ProjectFcgApp {
             // the chord can also arrive as typed text ("q", or "œ" on a Mac)
             ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
             self.focus_search(&ctx);
+        }
+        // Ctrl+E: search the plan (Outlook's search-mail key)
+        if !self.dialogs.any_modal_open() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::E)) {
+            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
+            self.focus_item_search(&ctx, None);
         }
         self.handle_keyboard(&ctx);
         self.update_title(&ctx);

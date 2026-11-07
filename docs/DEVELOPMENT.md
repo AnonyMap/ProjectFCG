@@ -5,7 +5,7 @@ Building, testing and releasing ProjectFCG, and where the code lives. See also [
 ## Building from source
 
 ```sh
-cargo test                          # 427 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, risk register, invariants, UI (headless)
+cargo test                          # 433 tests: engine, analysis, resources, board, dependencies, tracking, epics/Jira, MS Project XML, recurring and inactive tasks, filters and groups, releases, printing, task calendars, custom fields, risk register, invariants, UI (headless)
 cargo test --release --test perf -- --ignored --nocapture   # timings on 500–5,000-task projects
 cargo run --release -- --sample
 ./packaging/build-appimage.sh       # → dist/ProjectFCG-x86_64.AppImage
@@ -97,12 +97,19 @@ See [web/README.md](../web/README.md) for how saving works and what differs from
 * `tests/jobs.rs`: 2 tests: a large plan levels in the background with the same result as leveling in place, nothing else can change the plan meanwhile, and Cancel changes nothing.
 * `tests/project_tools.rs`: 6 tests: Sort with and without the outline, built-in sorts and back to ID; renumbering moving whole summaries with links intact; Find in any field both ways, opening collapsed summaries; Replace and Replace All (one undo step, all or nothing, Resource Names reassigning); Move Task on auto, manual, constrained, summary and started tasks; Physical % Complete in earned value, the default method, and Project XML.
 * `tests/from_finish.rs`: 4 tests: tasks hanging from the finish date with the start worked out, ASAP tasks starting with the project, negative slack when a task can't make the date, files, Project XML and undo.
-* `tests/tell_me.rs`: 9 tests for Search (Alt+Q):
+* `tests/item_search.rs`: 6 tests for searching the plan (Ctrl+E):
+  * names, IDs, ticket keys, risk keys, statement text and people (with what's assigned to them) are found, and every word must appear;
+  * Enter goes to a task even when it's collapsed or hidden by a filter;
+  * Shift+Enter opens Task Information;
+  * tickets open on the Board in their sprint, or in the Backlog;
+  * people and risks go to their views;
+  * Tab narrows to one kind, and Esc closes without anything reaching the table.
+* `tests/tell_me.rs`: 9 tests for Tell me (Alt+Q):
   * what people type finds the action: names, synonyms, sentences, typos and plurals, and nothing for nonsense;
   * recently used actions rank higher;
   * every ribbon button can be found (read from `ribbon.rs` itself);
   * ids are unique, and every one of the ~220 actions runs on the sample plan;
-  * the box from the keyboard: Alt+Q, typing, Enter; arrows and Esc; unavailable actions say why; tasks and Find.
+  * the box from the keyboard: Alt+Q, typing, Enter; arrows and Esc; unavailable actions say why; with no matching command, Enter hands the words to the plan search.
 * `tests/risks.rs`: 12 tests: each standard's levels and scores for the same cell (DoD matrix, PMI P × I, L × I, issues), the worst dimension and per-risk standards, custom matrix colours, statements and EMV, links, IDs never reused and repair, files (and files from before the register), CSV, the sample's register, and the Risk Register view: looking at every risk under every standard changes nothing, edits are one undo step that Undo reloads, Insert and Delete act on risks, and Add Risk for Task.
 * `tests/task_views.rs`: 4 tests: Network Diagram columns following links and summaries (and surviving a loop), Calendar weeks, spans across week rows and lanes, and both views selecting a task on click and opening Task Information on double-click.
 * `tests/views.rs`: 14 tests: custom filters comparing durations, dates, money and text by type, And/Or precedence, Within, related summary rows, Date Range and Using Resource, Group By (built-in and by field, rollups, collapsing, with filters), saving, undo and validation, and the 0.8 review's findings.

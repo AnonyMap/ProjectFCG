@@ -224,6 +224,12 @@ fn search(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.tell_me.query = "add dependency".into();
 }
 
+/// Search the plan (Ctrl+E): "lena" finds the person, her tasks and
+/// the risks that mention her.
+fn item_search(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.focus_item_search(ctx, Some("lena".into()));
+}
+
 /// Calendar: the month the build work happens in, a task selected.
 fn calendar(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.tab = RibbonTab::View;
@@ -261,6 +267,7 @@ const SCENES: &[Scene] = &[
     Scene { name: "sort", agile: false, setup: sort },
     Scene { name: "risks", agile: false, setup: risks },
     Scene { name: "search", agile: false, setup: search },
+    Scene { name: "item-search", agile: false, setup: item_search },
 ];
 
 struct Shot {

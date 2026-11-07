@@ -2,9 +2,20 @@
 
 What each version added, newest first, with the bugs that reviews and fuzzing found along the way. The [README](../README.md) describes the app as it is now.
 
-## 0.12: Search for what you want to do
+## 0.12: Search
 
-- **Search box:** in the title bar, as in Outlook and Word, opened with **Alt+Q** or a click (`src/app/tell_me.rs`). Type what you want to do and pick the action.
+**Search the plan (Ctrl+E)** (`src/app/item_search.rs`) is a second box in the title bar, as Outlook searches mail:
+
+- **What it searches:** tasks, tickets, people and risks, by name, ID ("7", "#7"), ticket key ("APP-12") or risk key ("R-003"). Every word typed has to appear somewhere in the item: notes, ticket descriptions, labels, assignees or risk statements.
+- **Ranking:** names, IDs and keys rank first. Results are grouped by kind with counts, the best kind first; Tab or the chips narrow it to one kind.
+- **Enter goes to the item:**
+  - a task in the Gantt Chart, opening collapsed summaries and clearing a filter that hides it;
+  - a ticket on the Board in its sprint, or in the Backlog or Epics panel (clearing a board filter that hides it);
+  - a person in the Resource Sheet;
+  - a risk in the Risk Register.
+- **Shift+Enter opens the item:** Task Information, the ticket, or Resource Information.
+
+**Tell me what you want to do (Alt+Q)** finds commands (`src/app/tell_me.rs`). Type what you want to do and pick the action.
 - **What it covers:** about 220 actions, which is every ribbon command plus every view, table, filter, highlight, group, sort, timescale, outline level and theme.
 - **Matching:**
   - Each action has other words people use for it.
@@ -13,7 +24,7 @@ What each version added, newest first, with the bugs that reviews and fuzzing fo
   - Every other word typed has to match.
   - Recently used and everyday actions rank higher, except on a typo guess.
 - **Each result shows** its ribbon location, its shortcut and whether a setting is on. Unavailable actions are greyed with the reason.
-- **Before you type,** it shows recently used actions (kept in the preferences) and suggestions. Below the actions come tasks whose names match, and Find in tasks.
+- **Before you type,** it shows recently used actions (kept in the preferences) and suggestions. When no command matches, it offers to search the plan for the words (Ctrl+E), or to use Find.
 - **Tests:** a test reads `ribbon.rs` and fails if any ribbon button can't be found by Search, so new buttons have to be added to it.
 
 ## 0.11: ProjectFCG in a browser
