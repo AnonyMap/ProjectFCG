@@ -96,6 +96,17 @@ Its two additions to Project are:
 - **Analysis:** critical path (one or several), total and free slack, negative slack when a date can't be met.
 - **Explanations:** the **Task Inspector** says why a task starts when it does. *Task Path* highlights what drives the selected task.
 
+### Search for what you want to do
+
+- **The box:** a search box in the title bar, as in Outlook and Word. Press **Alt+Q**, or click it, and type what you want to do; you don't need to know the command's name or which tab it's on.
+- **What it finds:** every ribbon command, plus every view, table, filter, group, sort and timescale.
+- **Forgiving matching:** each action carries other words people use for it ("remove" finds Delete, "dependency" finds Link, "holiday" finds Change Working Time). Plurals, small typos and whole sentences ("how do I add a milestone") work too.
+- **Each result shows** where the command lives and its shortcut, so you learn the faster way. Settings show whether they're on, and actions that can't run yet are greyed with the reason.
+- **Before you type,** it lists your recently used actions and a few suggestions. Below the actions come tasks whose names match, and Find in tasks.
+- **Keyboard:** ↑/↓ and Enter pick a result, and Esc closes the list.
+
+![Search: "add dependency" finds Link Tasks, with its ribbon location and shortcut](docs/search.png)
+
 ### Views
 
 - **Gantt Chart, Tracking Gantt, Detail Gantt and Leveling Gantt**, with a Timeline above them.
@@ -207,6 +218,8 @@ Start with `--sample` to see a finished plan, or **File ▸ New** for a blank on
 - To tie a risk to a task, right-click the task ▸ *Add Risk for Task*.
 - The matrix shows where risks sit and where their handling should take them.
 
+**Can't find something?** Press **Alt+Q** and describe it in your own words.
+
 Undo (Ctrl+Z) covers every edit. **F1** lists all keyboard shortcuts, which are Project's: Insert adds a task, F2 edits a cell, Shift+F2 opens Task Information, and F9 recalculates.
 
 ## Development
@@ -220,7 +233,7 @@ Undo (Ctrl+Z) covers every edit. **F1** lists all keyboard shortcuts, which are 
 
 **Structure.** The scheduling engine (`src/*.rs`) is a library with no user interface: calendars, the critical-path scheduler, resources and leveling, tracking, the board, risks, and file formats. The desktop app (`src/app/`) sits on top of it. That separation is what lets the tests drive the engine directly and the real interface without a window.
 
-**How correctness is checked.** 418 automated tests run on every release:
+**How correctness is checked.** 427 automated tests run on every release:
 
 - **Hand-derived expectations:** scheduling tests whose dates were worked out by hand from Project's rules.
 - **Reference implementations:** the fast calendar arithmetic and the fast leveler are compared with slow, obviously-correct versions on thousands of random cases.

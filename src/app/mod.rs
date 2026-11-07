@@ -24,6 +24,7 @@ pub mod release_dialogs;
 pub mod resource_dialogs;
 pub mod resource_sheet;
 pub mod risk_view;
+pub mod tell_me;
 pub mod safety;
 pub mod usage;
 pub mod ribbon;
@@ -322,6 +323,8 @@ pub struct ProjectFcgApp {
     pub network: network::NetworkState,
     pub calendar: calendar_view::CalendarState,
     pub risk_view: risk_view::RiskViewState,
+    /// Search (Alt+Q).
+    pub tell_me: tell_me::TellMe,
     #[cfg(target_arch = "wasm32")]
     pub web: web::WebState,
     #[cfg(target_arch = "wasm32")]
@@ -407,6 +410,7 @@ impl ProjectFcgApp {
             network: Default::default(),
             calendar: Default::default(),
             risk_view: Default::default(),
+            tell_me: Default::default(),
             #[cfg(target_arch = "wasm32")]
             web: Default::default(),
             #[cfg(target_arch = "wasm32")]
@@ -2182,6 +2186,12 @@ impl ProjectFcgApp {
                 }
             });
         }
+        // Alt+Q: Search, from anywhere (as in Office)
+        if !self.dialogs.any_modal_open() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::Q)) {
+            // the chord can also arrive as typed text ("q", or "œ" on a Mac)
+            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
+            self.focus_search(&ctx);
+        }
         self.handle_keyboard(&ctx);
         self.update_title(&ctx);
         // Copy Picture: the screenshot asked for last frame
@@ -2760,6 +2770,7 @@ pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
                 app.prefs.theme_mode = loaded.theme_mode;
                 app.prefs.accent = loaded.accent;
                 app.prefs.autorecover_minutes = loaded.autorecover_minutes;
+                app.prefs.recent_actions = loaded.recent_actions;
                 app.set_text_size(size);
                 app.prefs_path = Some(path);
             }

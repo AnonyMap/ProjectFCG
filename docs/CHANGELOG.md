@@ -2,6 +2,20 @@
 
 What each version added, newest first, with the bugs that reviews and fuzzing found along the way. The [README](../README.md) describes the app as it is now.
 
+## 0.12: Search for what you want to do
+
+- **Search box:** in the title bar, as in Outlook and Word, opened with **Alt+Q** or a click (`src/app/tell_me.rs`). Type what you want to do and pick the action.
+- **What it covers:** about 220 actions, which is every ribbon command plus every view, table, filter, highlight, group, sort, timescale, outline level and theme.
+- **Matching:**
+  - Each action has other words people use for it.
+  - Word prefixes, plurals and small typos match, and filler words ("how do I…") are ignored.
+  - Generic verbs ("add", "set", "show") count only when they match.
+  - Every other word typed has to match.
+  - Recently used and everyday actions rank higher, except on a typo guess.
+- **Each result shows** its ribbon location, its shortcut and whether a setting is on. Unavailable actions are greyed with the reason.
+- **Before you type,** it shows recently used actions (kept in the preferences) and suggestions. Below the actions come tasks whose names match, and Find in tasks.
+- **Tests:** a test reads `ribbon.rs` and fails if any ribbon button can't be found by Search, so new buttons have to be added to it.
+
 ## 0.11: ProjectFCG in a browser
 
 **The web build**
