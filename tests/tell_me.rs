@@ -2,7 +2,7 @@
 //! button can be found; every action runs; the box works from the keyboard.
 use egui::{vec2, Event, Key, Modifiers, Pos2, RawInput, Rect};
 use projectfcg::app::tell_me::{catalog, search, tokens};
-use projectfcg::app::{sample, MainView, ProjectFcgApp};
+use projectfcg::app::{sample, ProjectFcgApp};
 
 fn top(q: &str, n: usize) -> Vec<&'static str> {
     let cat = catalog();
