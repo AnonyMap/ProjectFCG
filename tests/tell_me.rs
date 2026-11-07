@@ -173,8 +173,11 @@ const ALT: Modifiers = Modifiers { alt: true, ctrl: false, shift: false, mac_cmd
 fn alt_q_type_enter_runs_the_action() {
     let mut h = H::new();
     h.app.select_index(2);
-    h.key(Key::Q, ALT);
+    // a browser (and some desktops) also sends the chord as typed text
+    h.frame(vec![Event::Key { key: Key::Q, physical_key: None, pressed: true, repeat: false, modifiers: ALT }, Event::Text("q".into())]);
+    h.frame(vec![]);
     assert!(h.focused() && h.app.tell_me.open, "Alt+Q puts the cursor in Search");
+    assert_eq!(h.app.tell_me.query, "", "and types nothing");
     h.typ("task info");
     h.key(Key::Enter, Modifiers::NONE);
     assert!(h.app.dialogs.task_info.is_some(), "Task Information opened");

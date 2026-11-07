@@ -2188,6 +2188,8 @@ impl ProjectFcgApp {
         }
         // Alt+Q: Search, from anywhere (as in Office)
         if !self.dialogs.any_modal_open() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::Q)) {
+            // the chord can also arrive as typed text ("q", or "œ" on a Mac)
+            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
             self.focus_search(&ctx);
         }
         self.handle_keyboard(&ctx);
