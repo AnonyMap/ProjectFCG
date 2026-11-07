@@ -19,6 +19,8 @@ pub struct Prefs {
     /// File ▸ Options ▸ Save: copy unsaved work for AutoRecover every N
     /// minutes (0: off).
     pub autorecover_minutes: u32,
+    /// Search (Alt+Q): the actions used most recently, newest first.
+    pub recent_actions: Vec<String>,
 }
 
 impl Default for Prefs {
@@ -29,6 +31,7 @@ impl Default for Prefs {
             theme_mode: Default::default(),
             accent: Default::default(),
             autorecover_minutes: 5,
+            recent_actions: vec![],
         }
     }
 }
@@ -95,6 +98,7 @@ impl Prefs {
         }
         self.ui_zoom = self.ui_zoom.clamp(0.5, 3.0);
         self.autorecover_minutes = self.autorecover_minutes.min(120);
+        self.recent_actions.truncate(8);
         self
     }
 }
@@ -129,7 +133,7 @@ mod tests {
         let a = Prefs { text_size: 20.0, ui_zoom: 1.5, ..Default::default() };
         a.save(&oldest).unwrap();
         assert_eq!(load_with_migration(&new), a, "0.1–0.2 prefs are picked up");
-        let b = Prefs { text_size: 18.0, ui_zoom: 1.0, theme_mode: ThemeMode::Dark, accent: Accent::Green, autorecover_minutes: 5 };
+        let b = Prefs { text_size: 18.0, ui_zoom: 1.0, theme_mode: ThemeMode::Dark, accent: Accent::Green, autorecover_minutes: 5, recent_actions: vec!["link".into()] };
         b.save(&older).unwrap();
         assert_eq!(load_with_migration(&new), b, "0.3 prefs win over 0.1–0.2");
         let c = Prefs { text_size: 16.0, ..Default::default() };

@@ -72,13 +72,25 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         x += w + 2.0;
     }
     // document title on the right
-    ui.painter().text(
+    let title = ui.painter().text(
         pos2(strip.right() - 10.0, strip.center().y),
         Align2::RIGHT_CENTER,
         format!("{}{} - ProjectFCG", if app.dirty { "*" } else { "" }, app.file_name()),
         FontId::proportional(12.5),
         th.on_band.gamma_multiply(0.86),
     );
+    // Search (Alt+Q) between the tabs and the title, as in Office
+    let room = (title.left() - 16.0) - (x + 16.0);
+    let w = room.min(320.0);
+    if w >= 150.0 {
+        let left = x + 16.0 + (room - w) / 2.0;
+        let r = Rect::from_min_size(pos2(left, strip.top() + 3.0), vec2(w, strip.height() - 6.0));
+        super::tell_me::search_box(app, ui, r);
+    } else if app.tell_me.open {
+        // too narrow for the box: Alt+Q still opens it under the tabs
+        let r = Rect::from_min_size(pos2(strip.left() + 8.0, strip.top() + 3.0), vec2(300.0, strip.height() - 6.0));
+        super::tell_me::search_box(app, ui, r);
+    }
 
     // ---- group panel ----
     egui::Frame::new()

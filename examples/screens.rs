@@ -215,6 +215,15 @@ fn risks(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.select_risk(id);
 }
 
+/// Search (Alt+Q): "add a dependency" finds Link Tasks, with where it lives
+/// and its shortcut.
+fn search(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.prefs.recent_actions = vec!["set_baseline".into()];
+    app.select_index(6);
+    app.focus_search(ctx);
+    app.tell_me.query = "add dependency".into();
+}
+
 /// Calendar: the month the build work happens in, a task selected.
 fn calendar(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.tab = RibbonTab::View;
@@ -251,6 +260,7 @@ const SCENES: &[Scene] = &[
     Scene { name: "calendar-view", agile: false, setup: calendar },
     Scene { name: "sort", agile: false, setup: sort },
     Scene { name: "risks", agile: false, setup: risks },
+    Scene { name: "search", agile: false, setup: search },
 ];
 
 struct Shot {
