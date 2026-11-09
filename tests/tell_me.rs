@@ -2,7 +2,7 @@
 //! button can be found; every action runs; the box works from the keyboard.
 use egui::{vec2, Event, Key, Modifiers, Pos2, RawInput, Rect};
 use projectfcg::app::tell_me::{catalog, search, tokens};
-use projectfcg::app::{sample, MainView, ProjectFcgApp};
+use projectfcg::app::{sample, ProjectFcgApp};
 
 fn top(q: &str, n: usize) -> Vec<&'static str> {
     let cat = catalog();
@@ -216,16 +216,17 @@ fn unavailable_actions_say_why_and_do_nothing() {
 }
 
 #[test]
-fn tasks_and_find_are_offered_too() {
+fn no_action_hands_the_words_to_the_plan_search() {
     let mut h = H::new();
-    h.app.execute(projectfcg::app::commands::Command::ShowView(MainView::Risks), &h.ctx.clone());
     h.key(Key::Q, ALT);
     h.typ("database migration");
-    // no action is called that: the task comes first, then Find
+    // no command is called that: the first row searches the plan (Ctrl+E)
     h.key(Key::Enter, Modifiers::NONE);
-    assert_eq!(h.app.view.main, MainView::Gantt, "back to the tasks");
-    let i = h.app.active_index().expect("a task is selected");
-    assert_eq!(h.app.project.tasks[i].name, "Database migration");
+    assert!(!h.app.tell_me.open);
+    assert!(h.app.item_search.open, "the plan search opened");
+    assert_eq!(h.app.item_search.query, "database migration", "with the words");
+    h.frame(vec![]);
+    assert!(h.ctx.memory(|m| m.has_focus(projectfcg::app::item_search::box_id())));
 }
 
 #[test]

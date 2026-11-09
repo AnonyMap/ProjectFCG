@@ -461,7 +461,8 @@ pub const SHORTCUT_HELP: &[(&str, &str)] = &[
     ("Board: Insert / Enter / Delete", "New ticket / edit ticket / delete ticket"),
     ("Board: Ctrl+F / Esc", "Filter the tickets / clear the filter"),
     ("Ctrl+0", "Reset text size and interface zoom"),
-    ("Alt+Q", "Search: type what you want to do"),
+    ("Ctrl+E", "Search tasks, tickets, people and risks"),
+    ("Alt+Q", "Tell me: search for a command"),
     ("F1", "This list"),
 ];
 

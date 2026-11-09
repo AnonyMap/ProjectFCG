@@ -79,17 +79,31 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         FontId::proportional(12.5),
         th.on_band.gamma_multiply(0.86),
     );
-    // Search (Alt+Q) between the tabs and the title, as in Office
+    // Between the tabs and the title: search the plan (Ctrl+E) and, as
+    // in Office, "Tell me what you want to do" (Alt+Q)
     let room = (title.left() - 16.0) - (x + 16.0);
-    let w = room.min(320.0);
-    if w >= 150.0 {
-        let left = x + 16.0 + (room - w) / 2.0;
-        let r = Rect::from_min_size(pos2(left, strip.top() + 3.0), vec2(w, strip.height() - 6.0));
-        super::tell_me::search_box(app, ui, r);
-    } else if app.tell_me.open {
-        // too narrow for the box: Alt+Q still opens it under the tabs
-        let r = Rect::from_min_size(pos2(strip.left() + 8.0, strip.top() + 3.0), vec2(300.0, strip.height() - 6.0));
-        super::tell_me::search_box(app, ui, r);
+    let h = strip.height() - 6.0;
+    let (items_w, tell_w) = if room >= 560.0 {
+        (330.0, 220.0)
+    } else if room >= 330.0 {
+        (room - 150.0, 140.0)
+    } else {
+        (0.0, 0.0)
+    };
+    if items_w > 0.0 {
+        let left = x + 16.0 + (room - items_w - tell_w - 10.0) / 2.0;
+        let ri = Rect::from_min_size(pos2(left, strip.top() + 3.0), vec2(items_w, h));
+        let rt = Rect::from_min_size(pos2(ri.right() + 10.0, strip.top() + 3.0), vec2(tell_w, h));
+        super::item_search::search_box(app, ui, ri);
+        super::tell_me::search_box(app, ui, rt);
+    } else {
+        // too narrow for the boxes: Ctrl+E and Alt+Q open them over the tabs
+        let r = Rect::from_min_size(pos2(strip.left() + 8.0, strip.top() + 3.0), vec2(320.0, h));
+        if app.item_search.open {
+            super::item_search::search_box(app, ui, r);
+        } else if app.tell_me.open {
+            super::tell_me::search_box(app, ui, r);
+        }
     }
 
     // ---- group panel ----

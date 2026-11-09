@@ -10,8 +10,8 @@
 //! * Matching is forgiving: word prefixes, plurals and small typos count,
 //!   and every word typed has to match something.
 //! * Before anything is typed it shows the recently used actions (kept in
-//!   the preferences) and a few suggestions. Below the actions come tasks
-//!   whose names match, and Find in tasks.
+//!   the preferences) and a few suggestions. Below the actions: search the
+//!   plan for the words instead (Ctrl+E, item_search.rs), and Find.
 //! * Unavailable actions are shown greyed, with the reason.
 
 use super::commands::{Command, Filter, Timescale};
@@ -107,6 +107,7 @@ pub fn catalog() -> Vec<Action> {
         a("select_all", "▦", "Select All Tasks", "Task ▸ Editing", "Ctrl+A", "everything", Cmd(Command::SelectAll)),
         a("find", "🔍", "Find", "Task ▸ Editing ▸ Find", "Ctrl+F", "search look locate", Cmd(Command::Find)),
         a("replace", "🔁", "Replace", "Task ▸ Editing ▸ Replace", "Ctrl+H", "find substitute change rename bulk", Cmd(Command::ReplaceDlg)),
+        a("search_items", "🔍", "Search Tasks, Tickets, People and Risks", "Title bar ▸ Search", "Ctrl+E", "find look up locate item ticket key task id person resource risk", Do(|a, c| a.focus_item_search(c, None))),
         a("go_to", "👉", "Go To", "Task ▸ Editing ▸ Go To", "F5", "jump id date navigate", Cmd(Command::GoTo)),
         a("scroll_to_task", "🎯", "Scroll to Task", "Task ▸ Editing ▸ Scroll to Task", "Ctrl+Shift+F5", "show bar chart navigate locate", Cmd(Command::ScrollToTask)).when(task_selected, SELECT_TASK),
         // ---- Tasks
@@ -543,13 +544,13 @@ pub struct TellMe {
 #[derive(Clone, Copy, PartialEq)]
 enum Row {
     Action(usize),
-    Task(usize),
+    /// Search the plan for the words (Ctrl+E).
+    Items,
     Find,
     Header(&'static str),
 }
 
 const MAX_ACTIONS: usize = 8;
-const MAX_TASKS: usize = 4;
 
 impl ProjectFcgApp {
     /// Format ▸ Columns ▸ Reset Columns.
@@ -588,13 +589,8 @@ impl ProjectFcgApp {
             rows.push(Row::Header("Actions"));
             rows.extend(hits.into_iter().take(MAX_ACTIONS).map(Row::Action));
         }
-        let needle = q.to_lowercase();
-        let tasks: Vec<usize> = self.project.tasks.iter().enumerate().filter(|(_, t)| t.name.to_lowercase().contains(&needle)).map(|(i, _)| i).take(MAX_TASKS).collect();
-        if !tasks.is_empty() {
-            rows.push(Row::Header("Tasks"));
-            rows.extend(tasks.into_iter().map(Row::Task));
-        }
         rows.push(Row::Header("More"));
+        rows.push(Row::Items);
         rows.push(Row::Find);
         rows
     }
@@ -626,16 +622,10 @@ impl ProjectFcgApp {
                     Run::Do(f) => f(self, ctx),
                 }
             }
-            Row::Task(i) => {
+            Row::Items => {
+                let q = self.tell_me.query.trim().to_string();
                 close(self);
-                if !matches!(self.view.main, super::MainView::Gantt | super::MainView::TaskUsage | super::MainView::NetworkDiagram | super::MainView::Calendar) {
-                    self.execute(Command::ShowView(super::MainView::Gantt), ctx);
-                }
-                for a in self.project.ancestors_of(i) {
-                    self.project.tasks[a].collapsed = false;
-                }
-                self.select_index(i);
-                self.execute(Command::ScrollToTask, ctx);
+                self.focus_item_search(ctx, Some(q));
             }
             Row::Find => {
                 let q = self.tell_me.query.trim().to_string();
@@ -666,16 +656,22 @@ pub fn search_box(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect) {
         });
     }
     let before = app.tell_me.query.clone();
+    // the hint is painted in the theme's weak text colour: on the dark
+    // title bar it must be a light one while the box is unfocused
+    let hint = if focused { pal.text_dim } else { pal.on_band.gamma_multiply(0.8) };
+    let saved_weak = ui.visuals().weak_text_color;
+    ui.visuals_mut().weak_text_color = Some(hint);
     let resp = ui.put(
         r,
         egui::TextEdit::singleline(&mut app.tell_me.query)
             .id(id)
-            .hint_text(egui::RichText::new("🔍  Search  (Alt+Q)").color(pal.on_band.gamma_multiply(0.75)))
-            .text_color(pal.text)
+            .hint_text(egui::RichText::new("💡  Tell me what you want to do").color(pal.on_band.gamma_multiply(0.75)))
+            .text_color(if focused { pal.text } else { pal.on_band })
             .background_color(if focused { pal.bg } else { pal.band_hover })
             .margin(egui::Margin::symmetric(8, 3)),
     );
-    resp.clone().on_hover_text("Search for an action (as in Outlook and Word): type what you want to do");
+    ui.visuals_mut().weak_text_color = saved_weak;
+    resp.clone().on_hover_text("Tell me: search for a command (as in Outlook and Word): type what you want to do");
     if resp.gained_focus() || (focused && !app.tell_me.open) {
         app.tell_me.open = true;
     }
@@ -748,10 +744,9 @@ pub fn search_box(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect) {
                                 let ok = act.available(app);
                                 (act.icon.to_string(), act.label.to_string(), act.path.to_string(), act.keys.to_string(), ok, act.on.map(|f| f(app)), act.when.filter(|_| !ok).map(|(_, w)| w))
                             }
-                            Row::Task(i) => {
-                                let t = &app.project.tasks[i];
-                                let what = if t.is_sprint { "Sprint" } else if app.project.is_summary(i) { "Summary task" } else if t.is_milestone() { "Milestone" } else { "Task" };
-                                ("▸".into(), t.name.clone(), format!("{what} {} · {}", i + 1, t.calc.start.map(|d| d.format("%a %-m/%-d/%y").to_string()).unwrap_or_default()), String::new(), true, None, None)
+                            Row::Items => {
+                                let n = super::item_search::search(&app.project, app.tell_me.query.trim()).len();
+                                ("🔍".into(), format!("Search the plan for \u{201c}{}\u{201d}", app.tell_me.query.trim()), format!("{n} task(s), ticket(s), people or risks match"), "Ctrl+E".into(), true, None, None)
                             }
                             Row::Find => ("🔍".into(), format!("Find \u{201c}{}\u{201d} in tasks", app.tell_me.query.trim()), "Task ▸ Editing ▸ Find (any field, next match)".into(), "Ctrl+F".into(), true, None, None),
                             Row::Header(_) => unreachable!(),
