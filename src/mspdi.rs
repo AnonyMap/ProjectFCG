@@ -340,10 +340,8 @@ pub fn to_xml(p: &Project) -> String {
     w.el("HonorConstraints", b(s.honor_constraints));
     w.el("MultipleCriticalPaths", b(s.multiple_critical_paths));
     w.el("NewTasksEffortDriven", b(s.new_tasks_effort_driven));
-    if s.ev_baseline > 0 {
-        // Options ▸ Advanced ▸ Baseline for Earned Value calculations
-        w.el("BaselineForEarnedValue", s.ev_baseline.min(10).to_string());
-    }
+    // Options ▸ Advanced ▸ Baseline for Earned Value calculations
+    w.el("BaselineForEarnedValue", s.ev_baseline.min(10).to_string());
     w.el("AutoAddNewResourcesAndTasks", b(s.auto_add_resources));
     w.opt("StatusDate", p.status_date.map(dt));
     w.el("NewTasksAreManual", b(!s.new_tasks_auto));

@@ -127,8 +127,8 @@ The title bar has two search boxes, as Outlook does: one for what's in the plan,
 - **Gantt Chart, Tracking Gantt, Detail Gantt and Leveling Gantt**, with a Timeline above them.
 - **Network Diagram** and **Calendar**.
 - **Resource Sheet, Resource Usage and Task Usage**, with hours per day, week or month.
-- **Board** (sprints, backlog, burndown, velocity, cumulative flow) and **Risk Register**.
-- **Tables:** Entry, Schedule, Tracking, Cost, Work, Earned Value and Variance, plus more than 20 insertable columns and custom fields (Text, Number, Flag, Date and Cost).
+- **Board** (sprints, backlog, burndown, velocity, cumulative flow), **Risk Register** and **Earned Value**.
+- **Tables:** Entry, Schedule, Tracking, Cost, Work, Variance, and Project's three earned value tables (Earned Value, Cost Indicators, Schedule Indicators), plus more than 20 insertable columns and custom fields (Text, Number, Flag, Date and Cost).
 - **Built-in and custom filters, Group By, Sort, highlights, Find and Replace.**
 - **Formatting:** bar styles, text styles, gridlines, timescales and Gantt chart styles, saved with the plan.
 - **Themes:** six colour themes, light and dark mode (following the desktop), and adjustable text size and zoom.
@@ -145,7 +145,22 @@ The title bar has two search boxes, as Outlook does: one for what's in the plan,
 
 - **Baselines:** 0–10, with slippage lines and progress lines.
 - **Progress:** % complete, actual and remaining duration, and actual dates, with *Update Project* and *Mark on Track*.
-- **Earned value at the status date:** SPI, CPI, EAC and the rest, plus physical % complete.
+
+### Earned value
+
+Earned value is calculated the way Microsoft Project does it, at the status date and against the baseline you choose.
+
+- **In PMI or DoD terms, or both:** PV, EV, AC (PMI); BCWS, BCWP, ACWP (DoD EVMS); or "PV (BCWS)" as Project shows them. Every column, report and dialog follows the choice (Options, or the Earned Value view).
+- **Project's options:** the baseline earned value is measured against (Baseline or Baselines 1–10), and each task's method, % Complete or Physical % Complete.
+- **DoD's discrete techniques too:** 0/100, 50/50 and level of effort, which set when value is planned as well as when it's earned.
+- **Planned value is timephased like Project's.** A resource whose cost accrues at the start or at the end is planned then, and the rest is spread over the baseline's working time.
+- **The figures:** SV, SV%, CV, CV%, SPI, CPI, BAC, EAC, ETC, VAC, TCPI, and TCPI to the EAC. EAC can be forecast four ways: Project's CPI formula, CPI × SPI, at the budgeted rate, or the scheduled cost (bottom-up).
+- **The Earned Value view** (View or Project tab) has:
+  - the S-curve of PV, EV and AC over time, with the EAC projected to the forecast finish;
+  - every index at a glance, with a sentence saying where the plan stands;
+  - a period report laid out like the DoD's IPMDAR / CPR Format 1: current period (a week or a month), cumulative to date and at completion, by outline level.
+
+![The Earned Value view in DoD terms: the S-curve, the indices and a Format 1 period report](docs/earned-value.png)
 
 ### Agile board
 
@@ -216,7 +231,8 @@ Start with `--sample` to see a finished plan, or **File ▸ New** for a blank on
 6. **Save a baseline** (**Project ▸ Set Baseline**) once the plan is agreed. It's the yardstick that progress and slippage are measured against.
 7. **Track progress.**
    - Set a status date, then enter % complete or actual dates (Task ▸ Update Tasks), or use **Project ▸ Update Project** for many tasks at once.
-   - The **Tracking Gantt** shows actuals against the baseline, and the **Earned Value** table says whether you're ahead or behind on time and money.
+   - The **Tracking Gantt** shows actuals against the baseline.
+   - The **Earned Value** view says whether you're ahead or behind on time and money, and by how much it will end over or under budget. Pick PMI or DoD terms there.
 8. **Share it.**
    - Save as `.pfcg`, or **File ▸ Save as XML** for someone using Microsoft Project.
    - **File ▸ Print** gives a PDF.

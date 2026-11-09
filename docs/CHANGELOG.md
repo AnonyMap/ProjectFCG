@@ -2,6 +2,26 @@
 
 What each version added, newest first, with the bugs that reviews and fuzzing found along the way. The [README](../README.md) describes the app as it is now.
 
+## 0.13: Earned value, Project's way, in PMI or DoD terms
+
+Earned value has been calculated since 0.6. 0.13 brings the rest of Project's earned value features, plus what DoD EVMS reports need (`src/earned_value.rs`, `src/app/ev_view.rs`).
+
+- **Terms:** PMI (PV, EV, AC), DoD EVMS (BCWS, BCWP, ACWP), or both, as Project shows them. The choice is saved with the plan and used for column headings, the Earned Value view and Statistics.
+- **Options ▸ Earned value options for this project:**
+  - the baseline earned value is measured against (Baseline or Baselines 1–10, as Project's "Baseline for Earned Value calculations", also read and written in Project XML);
+  - the default task method;
+  - the terms;
+  - how EAC is forecast: Project's CPI formula, CPI × SPI, at the budgeted rate, or the scheduled cost.
+- **Task methods:** besides Project's % Complete and Physical % Complete, DoD's 0/100, 50/50 and level of effort.
+- **Planned value is timephased:** costs accruing at a task's start or end are planned then, as in Project. Before, every baseline cost was spread evenly.
+- **New columns:** SV%, CV%, ETC and TCPI (EAC). **New tables:** Project's Earned Value Cost Indicators and Earned Value Schedule Indicators.
+- **The Earned Value view** (View ▸ Earned Value, or Project ▸ Earned Value):
+  - the S-curve of PV, EV and AC with the EAC projection, BAC and the status date;
+  - tiles for every index;
+  - a period report (current period, cumulative to date, at completion) laid out like IPMDAR / CPR Format 1, by outline level, by week or by month.
+- **Fix:** a summary task's own fixed cost was counted in its budget (BAC) but never planned or earned. It now is.
+- **Tests:** `tests/earned_value.rs` (10 tests) works the numbers by hand: every formula and EAC method, accrual, the choice of baseline, each method, the terms, the tables, the S-curve and the current period, and the view in every state.
+
 ## 0.12: Search
 
 **Search the plan (Ctrl+E)** (`src/app/item_search.rs`) is a second box in the title bar, as Outlook searches mail:
