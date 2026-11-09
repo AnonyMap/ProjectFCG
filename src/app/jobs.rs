@@ -22,8 +22,12 @@ pub struct LevelJob {
 }
 
 impl ProjectFcgApp {
-    /// Should leveling this plan run in the background?
+    /// Should leveling this plan run in the background? (Never in a
+    /// browser: a web page has no threads, so it levels in the foreground.)
     pub fn level_in_background(&self) -> bool {
+        if cfg!(target_arch = "wasm32") {
+            return false;
+        }
         let n = self.project.tasks.len();
         let alap = self.project.tasks.iter().any(|t| t.constraint == crate::model::ConstraintType::ALAP);
         n >= BACKGROUND_TASKS || (alap && n >= BACKGROUND_TASKS_ALAP)
