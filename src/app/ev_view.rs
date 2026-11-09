@@ -292,7 +292,7 @@ fn chart(app: &mut ProjectFcgApp, ui: &mut egui::Ui, r: Rect) {
     for (k, (t, _)) in s.points.iter().enumerate() {
         if k % step == 0 {
             let label = match period {
-                EvPeriod::Month => t.format("%b %y").to_string(),
+                EvPeriod::Month => t.format("%b '%y").to_string(),
                 EvPeriod::Week => t.format("%-m/%-d").to_string(),
             };
             let lx = x(*t);

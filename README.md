@@ -258,13 +258,13 @@ Undo (Ctrl+Z) covers every edit. **F1** lists all keyboard shortcuts, which are 
 **Technology**
 
 - Rust, with the [egui](https://github.com/emilk/egui) toolkit over OpenGL. It's one native binary with no runtime to install.
-- About 37,000 lines of application code and 11,000 lines of tests.
+- About 40,000 lines of application code and 11,500 lines of tests.
 - Its only libraries are for dates, JSON, XML, PNG, the window and file dialogs.
 - **It makes no network connections.** The only other programs it ever starts are your desktop's theme setting reader (to follow light/dark mode) and your PDF viewer (to print).
 
 **Structure.** The scheduling engine (`src/*.rs`) is a library with no user interface: calendars, the critical-path scheduler, resources and leveling, tracking, the board, risks, and file formats. The desktop app (`src/app/`) sits on top of it. That separation is what lets the tests drive the engine directly and the real interface without a window.
 
-**How correctness is checked.** 433 automated tests run on every release:
+**How correctness is checked.** 443 automated tests run on every release:
 
 - **Hand-derived expectations:** scheduling tests whose dates were worked out by hand from Project's rules.
 - **Reference implementations:** the fast calendar arithmetic and the fast leveler are compared with slow, obviously-correct versions on thousands of random cases.
