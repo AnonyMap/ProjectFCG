@@ -127,6 +127,12 @@ pub struct OptionsDlg {
     /// computer, not of the plan.
     pub autorecover: u32,
     pub ev_method: crate::model::EvMethod,
+    /// Earned value options for this project.
+    pub ev_baseline: u8,
+    pub ev_terms: crate::model::EvTerms,
+    pub eac_method: crate::model::EacMethod,
+    /// Which baselines have been saved (for the baseline list).
+    pub baseline_saved: [Option<chrono::NaiveDateTime>; 11],
     pub error: Option<String>,
 }
 
@@ -349,6 +355,10 @@ impl Dialogs {
             currency: s.currency_symbol.clone(),
             autorecover: 5,
             ev_method: s.default_ev_method,
+            ev_baseline: s.ev_baseline.min(10),
+            ev_terms: s.ev_terms,
+            eac_method: s.eac_method,
+            baseline_saved: p.baseline_saved,
             error: None,
         });
     }
@@ -1483,17 +1493,50 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
             ui.label("Currency symbol:");
             ui.add(egui::TextEdit::singleline(&mut st.currency).desired_width(60.0).char_limit(4));
             ui.end_row();
-            ui.label("Default earned value method:");
+            ui.label("Save AutoRecover info every:");
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut st.autorecover).range(0..=120).suffix(" min"));
+                ui.weak(if st.autorecover == 0 { "off" } else { "a copy of unsaved work, for after a crash" });
+            });
+            ui.end_row();
+        });
+        ui.add_space(6.0);
+        ui.label(RichText::new("Earned value options for this project").strong());
+        egui::Grid::new("opt_ev_grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+            ui.label("Default task earned value method:");
             egui::ComboBox::from_id_salt("opt_ev").selected_text(st.ev_method.label()).show_ui(ui, |ui| {
                 for m in crate::model::EvMethod::ALL {
                     ui.selectable_value(&mut st.ev_method, m, m.label());
                 }
             });
             ui.end_row();
-            ui.label("Save AutoRecover info every:");
-            ui.horizontal(|ui| {
-                ui.add(egui::DragValue::new(&mut st.autorecover).range(0..=120).suffix(" min"));
-                ui.weak(if st.autorecover == 0 { "off" } else { "a copy of unsaved work, for after a crash" });
+            ui.label("Baseline for earned value calculations:");
+            let name = |n: u8, saved: &[Option<chrono::NaiveDateTime>; 11]| {
+                let b = if n == 0 { "Baseline".to_string() } else { format!("Baseline {n}") };
+                match saved[n as usize] {
+                    Some(d) => format!("{b} (saved {})", crate::model::fmt_date(d)),
+                    None => format!("{b} (not set)"),
+                }
+            };
+            egui::ComboBox::from_id_salt("opt_ev_bl").width(220.0).selected_text(name(st.ev_baseline, &st.baseline_saved)).show_ui(ui, |ui| {
+                for n in 0..=10u8 {
+                    let label = name(n, &st.baseline_saved);
+                    ui.selectable_value(&mut st.ev_baseline, n, label);
+                }
+            });
+            ui.end_row();
+            ui.label("Earned value terms:");
+            egui::ComboBox::from_id_salt("opt_ev_terms").width(220.0).selected_text(st.ev_terms.label()).show_ui(ui, |ui| {
+                for t in crate::model::EvTerms::ALL {
+                    ui.selectable_value(&mut st.ev_terms, t, t.label());
+                }
+            });
+            ui.end_row();
+            ui.label("Estimate at completion (EAC):");
+            egui::ComboBox::from_id_salt("opt_eac").width(220.0).selected_text(st.eac_method.label()).show_ui(ui, |ui| {
+                for m in crate::model::EacMethod::ALL {
+                    ui.selectable_value(&mut st.eac_method, m, m.label());
+                }
             });
             ui.end_row();
         });
@@ -1539,6 +1582,9 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         s.auto_add_resources = s2.auto_add;
         s.currency_symbol = s2.currency.trim().to_string();
         s.default_ev_method = s2.ev_method;
+        s.ev_baseline = s2.ev_baseline.min(10);
+        s.ev_terms = s2.ev_terms;
+        s.eac_method = s2.eac_method;
         Ok(())
     });
 }

@@ -635,6 +635,9 @@ pub fn compute_resources(p: &mut Project) {
     let mut work = vec![0i64; n];
     let mut cost = vec![0f64; n];
     let mut over = vec![false; n];
+    // the parts accruing at the start / finish (for timephased planned value)
+    let mut at_start = vec![0f64; n];
+    let mut at_end = vec![0f64; n];
     for (ai, a) in p.assignments.iter().enumerate() {
         if let (Some(&ti), Some(&ri)) = (idx.get(&a.task), ridx.get(&a.resource)) {
             if p.tasks[ti].calc.is_summary {
@@ -644,6 +647,11 @@ pub fn compute_resources(p: &mut Project) {
                 work[ti] += a.work;
             }
             cost[ti] += acalc[ai].cost;
+            match p.resources[ri].accrue {
+                crate::model::Accrue::Start => at_start[ti] += acalc[ai].cost,
+                crate::model::Accrue::End => at_end[ti] += acalc[ai].cost,
+                crate::model::Accrue::Prorated => {}
+            }
             over[ti] |= acalc[ai].overallocated;
         }
     }
@@ -658,6 +666,8 @@ pub fn compute_resources(p: &mut Project) {
             }
             work[par] += work[i];
             cost[par] += cost[i];
+            at_start[par] += at_start[i];
+            at_end[par] += at_end[i];
             over[par] |= over[i];
         }
     }
@@ -667,6 +677,8 @@ pub fn compute_resources(p: &mut Project) {
         let c = &mut p.tasks[i].calc;
         c.work = work[i];
         c.cost = cost[i];
+        c.cost_at_start = at_start[i];
+        c.cost_at_end = at_end[i];
         c.overallocated = over[i];
         if parents[i].is_none() && !inactive[i] {
             total_cost += cost[i];

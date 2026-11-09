@@ -1131,6 +1131,8 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
                     duration: dur_minutes(bl, "Duration").unwrap_or(0),
                     work: dur_minutes(bl, "Work").unwrap_or(0),
                     cost: float(bl, "Cost").unwrap_or(0.0) / 100.0,
+                    cost_at_start: 0.0,
+                    cost_at_end: 0.0,
                 });
             }
             if rows.iter().any(|r: &(i64, Task, Option<NaiveDateTime>)| r.1.uid == t.uid) {

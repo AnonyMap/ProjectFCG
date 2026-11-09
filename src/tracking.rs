@@ -10,11 +10,10 @@
 //! * Actual work and cost follow % complete ("updating task status updates
 //!   resource status"). Each resource's cost accrues at start, at end, or
 //!   prorated (its Accrue At setting); fixed costs are prorated.
-//! * Earned value is measured at the status date (or today) against
-//!   Baseline 0: BCWS = baseline cost × share of the baseline duration
-//!   elapsed; BCWP = baseline cost × % complete; ACWP = actual cost.
+//! * Earned value is measured at the status date (or today) against the
+//!   baseline chosen in Options; see [`crate::earned_value`].
 
-use crate::model::{Accrue, Project, ResourceType};
+use crate::model::{Project, ResourceType};
 use chrono::{NaiveDate, NaiveDateTime};
 
 pub type OpResult<T = ()> = Result<T, String>;
@@ -28,51 +27,7 @@ pub enum UpdateMode {
     ZeroOrHundred,
 }
 
-/// Earned value figures for a task or the project.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct EarnedValue {
-    pub bcws: f64,
-    pub bcwp: f64,
-    pub acwp: f64,
-    pub bac: f64,
-}
-
-impl EarnedValue {
-    /// Schedule variance (BCWP − BCWS): negative = behind.
-    pub fn sv(&self) -> f64 {
-        self.bcwp - self.bcws
-    }
-    /// Cost variance (BCWP − ACWP): negative = over budget.
-    pub fn cv(&self) -> f64 {
-        self.bcwp - self.acwp
-    }
-    /// Schedule performance index; `None` before anything was planned.
-    pub fn spi(&self) -> Option<f64> {
-        (self.bcws > 0.0).then(|| self.bcwp / self.bcws)
-    }
-    /// Cost performance index; `None` before any actual cost.
-    pub fn cpi(&self) -> Option<f64> {
-        (self.acwp > 0.0).then(|| self.bcwp / self.acwp)
-    }
-    /// Estimate at completion: ACWP + (BAC − BCWP) ÷ CPI (BAC while CPI is
-    /// unknown).
-    pub fn eac(&self) -> f64 {
-        match self.cpi() {
-            Some(c) if c > 0.0 => self.acwp + (self.bac - self.bcwp) / c,
-            _ => self.bac.max(self.acwp),
-        }
-    }
-    /// Variance at completion (BAC − EAC): negative = forecast overrun.
-    pub fn vac(&self) -> f64 {
-        self.bac - self.eac()
-    }
-    /// To-complete performance index: the CPI the rest must achieve to
-    /// finish on budget.
-    pub fn tcpi(&self) -> Option<f64> {
-        let left = self.bac - self.acwp;
-        (left.abs() > 1e-9).then(|| (self.bac - self.bcwp) / left)
-    }
-}
+pub use crate::earned_value::EarnedValue;
 
 impl Project {
     /// The date progress is measured at: the status date, or now.
@@ -319,123 +274,54 @@ impl Project {
     /// Earned value of a task (from its computed values).
     pub fn earned_value(&self, row: usize) -> EarnedValue {
         let c = &self.tasks[row].calc;
-        EarnedValue { bcws: c.bcws, bcwp: c.bcwp, acwp: c.acwp, bac: c.bac }
+        EarnedValue { bcws: c.bcws, bcwp: c.bcwp, acwp: c.acwp, bac: c.bac, cost: c.cost, eac_method: self.settings.eac_method }
     }
 
     /// Earned value of the whole project (top-level tasks summed).
     pub fn project_earned_value(&self) -> EarnedValue {
-        let mut ev = EarnedValue::default();
-        for (i, t) in self.tasks.iter().enumerate() {
+        let mut ev = EarnedValue { eac_method: self.settings.eac_method, ..Default::default() };
+        for i in 0..self.tasks.len() {
             if self.parent_of(i).is_none() {
-                ev.bcws += t.calc.bcws;
-                ev.bcwp += t.calc.bcwp;
-                ev.acwp += t.calc.acwp;
-                ev.bac += t.calc.bac;
+                ev.add(&self.earned_value(i));
             }
         }
         ev
     }
 }
 
-/// Actual cost of a leaf's assignment of `cost` at `pct` % complete.
-pub(crate) fn accrued(cost: f64, accrue: Accrue, pct: f64) -> f64 {
-    match accrue {
-        Accrue::Start => {
-            if pct > 0.0 {
-                cost
-            } else {
-                0.0
-            }
-        }
-        Accrue::End => {
-            if pct >= 100.0 {
-                cost
-            } else {
-                0.0
-            }
-        }
-        Accrue::Prorated => cost * pct / 100.0,
-    }
-}
+
 
 /// Fill actual work/cost and earned value into every task's `calc` (after
 /// costs are known). Leaves first, then rolled up through summaries.
 pub(crate) fn compute_tracking(p: &mut Project, acost: &[f64], parents: &[Option<usize>]) {
     let n = p.tasks.len();
-    let status = p.status_or_now();
     let idx: std::collections::HashMap<u32, usize> = p.tasks.iter().enumerate().map(|(i, t)| (t.uid, i)).collect();
     let ridx: std::collections::HashMap<u32, usize> = p.resources.iter().enumerate().map(|(i, r)| (r.uid, i)).collect();
     let mut actual_work = vec![0i64; n];
-    let mut actual_cost = vec![0f64; n];
-    for (ai, a) in p.assignments.iter().enumerate() {
+    for a in p.assignments.iter() {
         let (Some(&ti), Some(&ri)) = (idx.get(&a.task), ridx.get(&a.resource)) else { continue };
         if p.tasks[ti].calc.is_summary {
             continue;
         }
-        let pct = p.tasks[ti].percent_complete;
-        let r = &p.resources[ri];
-        if r.rtype == ResourceType::Work {
-            actual_work[ti] += (a.work as f64 * pct / 100.0).round() as i64;
-        }
-        actual_cost[ti] += accrued(acost.get(ai).copied().unwrap_or(0.0), r.accrue, pct);
-    }
-    let mut bcws = vec![0f64; n];
-    let mut bcwp = vec![0f64; n];
-    let mut bac = vec![0f64; n];
-    for i in 0..n {
-        if p.tasks[i].calc.is_summary {
-            continue;
-        }
-        let t = &p.tasks[i];
-        actual_cost[i] += t.fixed_cost * t.percent_complete / 100.0;
-        if let Some(b) = t.baseline {
-            bac[i] = b.cost;
-            let share = if status >= b.finish {
-                1.0
-            } else if status <= b.start {
-                0.0
-            } else {
-                let cal = p.scheduled_duration_calendar(i);
-                let total = cal.work_between(b.start, b.finish);
-                if total > 0 {
-                    cal.work_between(b.start, status) as f64 / total as f64
-                } else {
-                    1.0
-                }
-            };
-            bcws[i] = b.cost * share;
-            let done = match t.ev_method {
-                crate::model::EvMethod::PercentComplete => t.percent_complete,
-                crate::model::EvMethod::PhysicalPercentComplete => t.physical_percent,
-            };
-            bcwp[i] = b.cost * done.clamp(0.0, 100.0) / 100.0;
+        if p.resources[ri].rtype == ResourceType::Work {
+            actual_work[ti] += (a.work as f64 * p.tasks[ti].percent_complete / 100.0).round() as i64;
         }
     }
-    // summaries' own fixed cost accrues with their rolled-up progress (and
-    // counts toward their budget as baselined)
     for i in (0..n).rev() {
-        if p.tasks[i].calc.is_summary && p.tasks[i].fixed_cost != 0.0 {
-            actual_cost[i] += p.tasks[i].fixed_cost * p.tasks[i].calc.percent_complete / 100.0;
-            if p.tasks[i].baseline.is_some() {
-                bac[i] += p.tasks[i].fixed_cost;
-            }
-        }
         if let Some(par) = parents[i] {
             actual_work[par] += actual_work[i];
-            actual_cost[par] += actual_cost[i];
-            bcws[par] += bcws[i];
-            bcwp[par] += bcwp[i];
-            bac[par] += bac[i];
         }
     }
+    // actual cost is the earned value's ACWP at the status date
+    let ev = p.earned_value_with(p.status_or_now(), acost, parents);
     for i in 0..n {
         let c = &mut p.tasks[i].calc;
         c.actual_work = actual_work[i];
-        c.actual_cost = (actual_cost[i] * 100.0).round() / 100.0;
+        c.actual_cost = (ev[i].acwp * 100.0).round() / 100.0;
         c.acwp = c.actual_cost;
-        c.bcws = bcws[i];
-        c.bcwp = bcwp[i];
-        c.bac = bac[i];
+        c.bcws = ev[i].bcws;
+        c.bcwp = ev[i].bcwp;
+        c.bac = ev[i].bac;
     }
 }
 
