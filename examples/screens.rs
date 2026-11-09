@@ -215,6 +215,28 @@ fn risks(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.select_risk(id);
 }
 
+/// Earned Value: five weeks into the release, development is behind and
+/// the backend is costing more than planned. DoD terms.
+fn earned_value(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.tab = RibbonTab::Project;
+    app.project.set_baseline(None);
+    // the backend turned out to need 14 days, not 10
+    let r = row(app, "Backend API");
+    app.project.set_field_text(r, projectfcg::ops::Field::Duration, "14d").ok();
+    app.recalc();
+    let start = app.project.start;
+    app.project.status_date = Some(app.project.calendar.add_work(start, 24 * 480));
+    for (name, pct) in [("Define requirements", 100.0), ("Architecture review", 100.0), ("Backend API", 75.0), ("Frontend UI", 40.0), ("Database migration", 25.0), ("User documentation", 10.0)] {
+        let r = row(app, name);
+        app.project.set_percent_complete(r, pct).ok();
+    }
+    app.project.settings.ev_terms = projectfcg::model::EvTerms::Dod;
+    app.recalc();
+    app.execute(Command::ShowView(MainView::EarnedValue), ctx);
+    app.ev_view.period = projectfcg::earned_value::EvPeriod::Week;
+    app.ev_view.rows = projectfcg::app::ev_view::RowLevel::Level2;
+}
+
 /// Search (Alt+Q): "add a dependency" finds Link Tasks, with where it lives
 /// and its shortcut.
 fn search(app: &mut ProjectFcgApp, ctx: &egui::Context) {
@@ -266,6 +288,7 @@ const SCENES: &[Scene] = &[
     Scene { name: "calendar-view", agile: false, setup: calendar },
     Scene { name: "sort", agile: false, setup: sort },
     Scene { name: "risks", agile: false, setup: risks },
+    Scene { name: "earned-value", agile: false, setup: earned_value },
     Scene { name: "search", agile: false, setup: search },
     Scene { name: "item-search", agile: false, setup: item_search },
 ];

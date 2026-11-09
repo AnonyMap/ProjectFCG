@@ -340,6 +340,10 @@ pub fn to_xml(p: &Project) -> String {
     w.el("HonorConstraints", b(s.honor_constraints));
     w.el("MultipleCriticalPaths", b(s.multiple_critical_paths));
     w.el("NewTasksEffortDriven", b(s.new_tasks_effort_driven));
+    if s.ev_baseline > 0 {
+        // Options ▸ Advanced ▸ Baseline for Earned Value calculations
+        w.el("BaselineForEarnedValue", s.ev_baseline.min(10).to_string());
+    }
     w.el("AutoAddNewResourcesAndTasks", b(s.auto_add_resources));
     w.opt("StatusDate", p.status_date.map(dt));
     w.el("NewTasksAreManual", b(!s.new_tasks_auto));
@@ -912,6 +916,9 @@ pub fn from_xml(xml: &str) -> Result<(Project, Vec<String>), String> {
         }
         if let Some(v) = flag(root, "NewTasksAreManual") {
             s.new_tasks_auto = !v;
+        }
+        if let Some(n) = int(root, "BaselineForEarnedValue").filter(|n| (0..=10).contains(n)) {
+            s.ev_baseline = n as u8;
         }
         if int(root, "DefaultTaskEVMethod") == Some(1) {
             s.default_ev_method = crate::model::EvMethod::PhysicalPercentComplete;

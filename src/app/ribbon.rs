@@ -698,36 +698,16 @@ fn project_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
     group(ui, "Status", |ui| {
         ui.vertical(|ui| {
             ui.label(RichText::new("Status date:").size(12.0));
-            let id = ui.make_persistent_id("status_date_text");
-            let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| app.project.status_date.map(crate::model::fmt_date).unwrap_or_else(|| "NA".into()));
-            let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(96.0).background_color(pal().header_bg)).on_hover_text("Progress, Late tasks, progress lines and earned value are measured at this date (NA = today)");
-            if r.lost_focus() {
-                let t = text.trim().to_string();
-                let parsed = if t.is_empty() || t.eq_ignore_ascii_case("na") {
-                    Ok(None)
-                } else {
-                    crate::model::parse_date(&t, app.project.default_finish_time()).map(Some)
-                };
-                match parsed {
-                    Ok(v) if v != app.project.status_date => {
-                        app.edit_project("Status Date", move |p| {
-                            p.status_date = v;
-                            Ok(())
-                        });
-                    }
-                    Ok(_) => {}
-                    Err(e) => app.error(e),
-                }
-                ui.data_mut(|d| d.remove::<String>(id));
-            } else if r.has_focus() {
-                ui.data_mut(|d| d.insert_temp(id, text));
-            }
+            status_date_field(app, ui, 96.0);
         });
         if big(ui, "🔄", "Update\nProject", "Mark work complete through a date, or reschedule unstarted work", true) {
             app.execute(Command::UpdateProject, &ctx);
         }
         if big(ui, "📊", "Statistics", "Current, baseline and actual dates, work and cost; earned value", true) {
             app.execute(Command::ProjectStatistics, &ctx);
+        }
+        if big(ui, "💹", "Earned\nValue", "Earned value over time (the S-curve), the indices, and a period report (PMI or DoD terms)", true) {
+            app.execute(Command::ShowView(super::MainView::EarnedValue), &ctx);
         }
     });
     group(ui, "Critical Path", |ui| {
@@ -780,6 +760,7 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             (MainView::NetworkDiagram, "🕸", "Network\nDiagram", "Tasks as boxes linked in the order the work happens; critical in red"),
             (MainView::Calendar, "📅", "Calendar", "The tasks on a month calendar"),
             (MainView::Risks, "⚠", "Risk\nRegister", "Risks, opportunities and issues: ratings, handling and the risk matrix (none, DoD or PMI)"),
+            (MainView::EarnedValue, "💹", "Earned\nValue", "Earned value over time (the S-curve), the indices, and a period report (PMI or DoD terms)"),
             (MainView::Board, "📋", "Board", "Kanban board: sprints, tickets, backlog, burndown"),
             (MainView::TaskUsage, "📆", "Task\nUsage", "Work per period for each task and its resources"),
             (MainView::ResourceSheet, "👥", "Resource\nSheet", "List of resources: rates, max units, calendars"),
@@ -1190,4 +1171,32 @@ fn help_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             app.execute(Command::About, &ctx);
         }
     });
+}
+
+/// The status date, typed in (Project ▸ Status; the Earned Value view).
+pub fn status_date_field(app: &mut ProjectFcgApp, ui: &mut egui::Ui, width: f32) {
+    let id = ui.make_persistent_id("status_date_text");
+    let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| app.project.status_date.map(crate::model::fmt_date).unwrap_or_else(|| "NA".into()));
+    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(width).background_color(pal().header_bg)).on_hover_text("Progress, Late tasks, progress lines and earned value are measured at this date (NA = today)");
+    if r.lost_focus() {
+        let t = text.trim().to_string();
+        let parsed = if t.is_empty() || t.eq_ignore_ascii_case("na") {
+            Ok(None)
+        } else {
+            crate::model::parse_date(&t, app.project.default_finish_time()).map(Some)
+        };
+        match parsed {
+            Ok(v) if v != app.project.status_date => {
+                app.edit_project("Status Date", move |p| {
+                    p.status_date = v;
+                    Ok(())
+                });
+            }
+            Ok(_) => {}
+            Err(e) => app.error(e),
+        }
+        ui.data_mut(|d| d.remove::<String>(id));
+    } else if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text));
+    }
 }

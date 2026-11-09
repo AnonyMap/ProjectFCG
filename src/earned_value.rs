@@ -21,8 +21,8 @@
 //!
 //! For dates before the status date (the S-curve, the current period),
 //! the work done on a task is spread evenly over the working time from its
-//! actual start to where its progress reached: Project timephases actual
-//! work the same way when it is entered as % complete.
+//! actual start to its actual finish, or to the status date while it is
+//! under way: % complete records how much is done, not when.
 
 use crate::model::{Accrue, Baseline, EacMethod, EvMethod, EvTerms, Project};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
@@ -183,6 +183,15 @@ impl EvTerms {
         }
     }
 
+    /// "Name (ABBR)", e.g. "Planned Value (PV)", "Budgeted Cost of Work
+    /// Scheduled (BCWS)", or for both "Planned Value (PV, BCWS)".
+    pub fn long(self, m: Metric) -> String {
+        match (self, m) {
+            (EvTerms::Both, Metric::Pv | Metric::Ev | Metric::Ac) => format!("{} ({}, {})", EvTerms::Pmi.name(m), EvTerms::Pmi.abbr(m), EvTerms::Dod.abbr(m)),
+            _ => format!("{} ({})", self.name(m), self.abbr(m)),
+        }
+    }
+
     /// The full name.
     pub fn name(self, m: Metric) -> &'static str {
         use Metric::*;
@@ -305,8 +314,9 @@ impl Project {
     }
 
     /// The fraction (0–1) of a task's current progress that had been made
-    /// by `at`: progress is spread over the working time from the actual
-    /// start to where it reached (at most the status date).
+    /// by `at`. With no record of when the work was done, it is spread
+    /// evenly over the working time from the actual start to the actual
+    /// finish, or for a task still under way, to the status date.
     pub fn progress_share_at(&self, row: usize, at: NaiveDateTime) -> f64 {
         let status = self.status_or_now();
         if at >= status {
@@ -318,8 +328,7 @@ impl Project {
             return 0.0;
         }
         let pct = t.calc.percent_complete.max(t.percent_complete);
-        let reached = if pct >= 100.0 { t.actual_finish.or(t.calc.finish) } else { crate::tracking::progress_point(self, row, status) };
-        let end = reached.unwrap_or(status).min(status);
+        let end = if pct >= 100.0 { t.actual_finish.or(t.calc.finish).unwrap_or(status).min(status) } else { status };
         if end <= a {
             return 1.0;
         }

@@ -49,7 +49,16 @@ fn what_people_type_finds_the_action() {
     among("screenshot", "copy_picture", 1);
     first("why does this task start", "inspect");
     among("story", "new_ticket", 2);
-    among("evm", "table_ev", 1);
+    first("evm", "view_ev");
+    among("evm", "table_ev", 3);
+    first("s curve", "view_ev");
+    first("earned value", "view_ev");
+    among("bcws", "view_ev", 2);
+    among("cpi", "table_ev_cost", 5);
+    first("cost indicators", "table_ev_cost");
+    first("schedule indicators", "table_ev_schedule");
+    among("earned value terms", "options", 2);
+    among("dod earned value", "options", 3);
     // sentences: the filler words don't count
     first("how do I add a milestone", "insert_milestone");
     first("I want to make a task recurring", "insert_recurring");
