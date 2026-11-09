@@ -103,7 +103,7 @@ impl Project {
         let take = |t: &crate::model::Task| -> Option<Baseline> {
             let (s, f) = (t.calc.start?, t.calc.finish?);
             let duration = if t.calc.is_summary { t.calc.summary_duration } else { t.duration.minutes };
-            Some(Baseline { start: s, finish: f, duration, work: t.calc.work, cost: t.calc.cost })
+            Some(Baseline { start: s, finish: f, duration, work: t.calc.work, cost: t.calc.cost, cost_at_start: t.calc.cost_at_start, cost_at_end: t.calc.cost_at_end })
         };
         match rows {
             None => {
@@ -129,7 +129,9 @@ impl Project {
                             if let (Some(s), Some(f)) = (kids.iter().map(|b| b.start).min(), kids.iter().map(|b| b.finish).max()) {
                                 let work = kids.iter().map(|b| b.work).sum();
                                 let cost = kids.iter().map(|b| b.cost).sum::<f64>() + self.tasks[a].fixed_cost;
-                                *self.tasks[a].baseline_slot_mut(n) = Some(Baseline { start: s, finish: f, duration: cal.work_between(s, f), work, cost });
+                                let cost_at_start = kids.iter().map(|b| b.cost_at_start).sum();
+                                let cost_at_end = kids.iter().map(|b| b.cost_at_end).sum();
+                                *self.tasks[a].baseline_slot_mut(n) = Some(Baseline { start: s, finish: f, duration: cal.work_between(s, f), work, cost, cost_at_start, cost_at_end });
                             }
                         }
                     }

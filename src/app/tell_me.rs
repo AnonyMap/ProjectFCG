@@ -94,7 +94,7 @@ pub fn catalog() -> Vec<Action> {
         a("export_csv", "📊", "Export Tasks as CSV", "File ▸ Share ▸ Export CSV", "", "excel spreadsheet sheets table export comma", Cmd(Command::ExportCsv)),
         a("import_jira", "📥", "Import Jira CSV", "File ▸ Share ▸ Import Jira CSV", "", "jira atlassian issues tickets import load csv", Cmd(Command::ImportJiraCsv)),
         a("export_jira", "📤", "Export Jira CSV", "File ▸ Share ▸ Export Jira CSV", "", "jira atlassian issues tickets export csv", Cmd(Command::ExportJiraCsv)),
-        a("options", "⚙", "Options", "File ▸ Settings ▸ Options", "", "settings preferences hours per day default start time currency autorecover configuration", Cmd(Command::Options)),
+        a("options", "⚙", "Options", "File ▸ Settings ▸ Options", "", "settings preferences hours per day default start time currency autorecover configuration earned value terms pmi dod baseline eac method", Cmd(Command::Options)),
         // ---- Clipboard and editing
         a("undo", "⟲", "Undo", "Quick Access ▸ Undo", "Ctrl+Z", "revert back mistake reverse", Cmd(Command::Undo)).when(|a| a.history.can_undo(), "Nothing to undo"),
         a("redo", "⟳", "Redo", "Quick Access ▸ Redo", "Ctrl+Y", "again repeat forward", Cmd(Command::Redo)).when(|a| a.history.can_redo(), "Nothing to redo"),
@@ -283,6 +283,7 @@ pub fn catalog() -> Vec<Action> {
         ("view_leveling", "📶", "Leveling Gantt", "gantt leveling delay view", Cmd(Command::SetGanttView(G::Leveling))),
         ("view_network", "🕸", "Network Diagram", "pert boxes dependencies flow chart view", Cmd(Command::ShowView(V::NetworkDiagram))),
         ("view_calendar", "📅", "Calendar View", "month calendar view schedule", Cmd(Command::ShowView(V::Calendar))),
+        ("view_ev", "💹", "Earned Value", "evm earned value s-curve s curve over time report pv ev ac bcws bcwp acwp spi cpi eac vac tcpi ipmdar cpr format 1 performance terms dod pmi view", Cmd(Command::ShowView(V::EarnedValue))),
         ("view_risks", "⚠", "Risk Register", "risks risk matrix heat map issues opportunities raid log dod pmi view", Cmd(Command::ShowView(V::Risks))),
         ("view_board", "📋", "Board", "kanban scrum sprint backlog tickets agile view", Cmd(Command::ShowView(V::Board))),
         ("view_task_usage", "📊", "Task Usage", "assignments work hours per day view", Cmd(Command::ShowView(V::TaskUsage))),
@@ -298,7 +299,9 @@ pub fn catalog() -> Vec<Action> {
         (super::columns::Table::Tracking, "table_tracking", "actual progress remaining"),
         (super::columns::Table::Cost, "table_cost", "money budget fixed cost baseline variance"),
         (super::columns::Table::Work, "table_work", "hours effort baseline variance"),
-        (super::columns::Table::EarnedValue, "table_ev", "evm ev pv ac sv cv spi cpi"),
+        (super::columns::Table::EarnedValue, "table_ev", "evm ev pv ac sv cv spi cpi bcws bcwp acwp"),
+        (super::columns::Table::EarnedValueCost, "table_ev_cost", "evm cost indicators cv cpi eac vac tcpi"),
+        (super::columns::Table::EarnedValueSchedule, "table_ev_schedule", "evm schedule indicators sv spi"),
         (super::columns::Table::Variance, "table_variance", "baseline start finish slip"),
     ] {
         let label: &'static str = Box::leak(format!("{} Table", t.label()).into_boxed_str());

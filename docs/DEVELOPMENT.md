@@ -115,6 +115,7 @@ See [web/README.md](../web/README.md) for how saving works and what differs from
 * `tests/views.rs`: 14 tests: custom filters comparing durations, dates, money and text by type, And/Or precedence, Within, related summary rows, Date Range and Using Resource, Group By (built-in and by field, rollups, collapsing, with filters), saving, undo and validation, and the 0.8 review's findings.
 * `tests/releases.rs`: 10 tests: progress, projection and risk as stories move between sprints, what can carry a release, a milestone following its release (and the tasks linked to it), loops reported, releasing with carry-over, repairing files, Fix Version/s in Jira CSV, and the 0.8 review's findings.
 * `tests/board.rs`: 17 tests (including the sample's current sprint on every day of the week, and cumulative flow from recorded moves): starting and completing sprints (commitment, carry-over with sub-tasks, frozen velocity, reopening), editing columns (remapping, Done follows the last column); new sprints, ticket moves and ordering, done stamping, progress by points and by count, unestimated fallback, unmarking and deleting sprints, burndown, velocity and its average, assignees booking no work, file round-trip and loading 0.4 files, and the agile sample pinned to a fixed date.
+* `tests/earned_value.rs`: 10 tests: every formula (SV%, CV%, ETC, TCPI to the BAC and to the EAC, the shares of budget) and the four EAC methods; a task worked by hand; planned value following accrual (and older baselines without it); the baseline for earned value (and in Project XML); % Complete, Physical % Complete, 0/100, 50/50 and level of effort; PMI/DoD/both column titles and files without the settings; Project's Cost and Schedule Indicator tables; earned value over time and the current period; mixed methods rolled up; and the Earned Value view in every set of terms and period, with one undo step per setting.
 * `tests/tracking.rs`: 13 tests: % complete stamping actuals, an actual start pinning the task, actual finish, actual/remaining duration, Update Project through a date, Mark on Track at the status date, earned value worked by hand and rolled up, the three accrual rules, baselines 0–10, leveling leaving started tasks alone, progress-line points, and saving tracking data while loading 0.5 baselines.
 * `tests/epics.rs`: 14 tests: 60 seeded random sequences of board operations (add, move, retype, re-parent, link, unlink, delete, epic→task), checking after every step that the hierarchy rules hold and that undo/redo is exact, then a Jira export → import of the result; repairing hand-edited boards on load; epics outside sprints and their progress, sub-tasks following their parent and counting nothing, cascading deletes, links in both directions with cycle and duplicate checks, an epic driving a Gantt task, keys, and Jira CSV import (a realistic export with repeated Labels/Sprint columns, links and sub-tasks), sprint creation in natural order, renumbering on clashes, and a full export → import round trip.
 * `tests/mspdi.rs`: 10 tests: 4,500 randomly damaged XML files (bad numbers, dates, durations, truncation) and 200 damaged Jira CSVs, none of which may panic; a rich plan (all resource types, % and elapsed lags, manual task, baselines 0 and 3, progress, resource vacation) round-trips with identical dates, costs and assignments, and the second trip is byte-identical; units as Project writes them; **every element's order checked against the schema's sequences**; a Project-style file with the project summary task, yearly and "last Monday" recurring holidays, a cross-project link, a midnight shift and placeholder rows; and files written by a second MSPDI writer (MPXJ 16) from our samples.
@@ -147,7 +148,8 @@ src/pdf.rs        a small PDF writer (vector drawing, base-14 fonts)
 src/recovery.rs   atomic writes, AutoRecover files, crash reports (no window needed)
 src/sanitize.rs   values from files into range before scheduling
 src/recurring.rs  recurring task patterns and occurrences
-src/tracking.rs   actuals, Update Project, Mark on Track, earned value
+src/tracking.rs   actuals, Update Project, Mark on Track
+src/earned_value.rs  earned value: timephased PV, EV methods, indices, EAC methods, PMI/DoD terms, over time
 src/jira.rs       Jira CSV import/export (CSV parser, field mapping)
 src/mspdi.rs      Microsoft Project XML (MSPDI) import/export
 src/analysis.rs   task paths, critical tasks, baselines
@@ -159,7 +161,7 @@ src/app/          egui front end (ribbon, table, gantt, bars, timeline, inspecto
                   resource sheet, usage views, resource dialogs, themes, system theme detection,
                   board view, tracking and import dialogs, filters and groups, release dialogs, print,
                   safety (caught panics, AutoRecover), jobs (background leveling), sort, find/replace,
-                  move tasks, network diagram, calendar view, risk register)
+                  move tasks, network diagram, calendar view, risk register, earned value view)
 examples/xmldump.rs  writes the samples as MS Project XML (for checking with other tools)
 examples/screens.rs  renders the README screenshots (`xvfb-run cargo run --release --example screens -- docs board`)
 examples/profile.rs  profiling driver (callgrind: `cargo build --profile profiling --example profile`)

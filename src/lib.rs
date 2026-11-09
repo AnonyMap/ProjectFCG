@@ -10,6 +10,7 @@ pub mod calendar;
 pub mod calendars;
 pub mod custom_fields;
 pub mod duration;
+pub mod earned_value;
 pub mod format;
 pub mod history;
 pub mod io;

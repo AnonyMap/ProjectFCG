@@ -142,6 +142,9 @@ pub struct Computed {
     pub work: i64,
     /// Fixed cost + assignment costs; rolled up for summaries.
     pub cost: f64,
+    /// The parts of `cost` accruing at the start and at the finish.
+    pub cost_at_start: f64,
+    pub cost_at_end: f64,
     /// One of the task's resources is overallocated while it works on it.
     pub overallocated: bool,
     /// Where the task would start without its leveling delay (the early
@@ -216,6 +219,12 @@ pub struct Baseline {
     pub work: i64,
     #[serde(default)]
     pub cost: f64,
+    /// The parts of `cost` that accrue at the start and at the finish (the
+    /// rest is prorated): when the cost was planned to be spent.
+    #[serde(default)]
+    pub cost_at_start: f64,
+    #[serde(default)]
+    pub cost_at_end: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -306,7 +315,8 @@ pub struct Task {
     pub calc: Computed,
 }
 
-/// How a task's earned value (BCWP) is measured.
+/// How a task's earned value (BCWP) is measured: Project's two methods,
+/// and the discrete earned value techniques of DoD EVMS.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EvMethod {
     /// Baseline cost × % Complete.
@@ -314,14 +324,90 @@ pub enum EvMethod {
     PercentComplete,
     /// Baseline cost × Physical % Complete.
     PhysicalPercentComplete,
+    /// 0/100: nothing is earned (or planned) until the task finishes.
+    ZeroHundred,
+    /// 50/50: half is earned (and planned) at the start, half at the finish.
+    FiftyFifty,
+    /// Level of effort: earned with the passage of time (BCWP = BCWS), so
+    /// it never shows a schedule variance.
+    LevelOfEffort,
 }
 
 impl EvMethod {
-    pub const ALL: [EvMethod; 2] = [EvMethod::PercentComplete, EvMethod::PhysicalPercentComplete];
+    pub const ALL: [EvMethod; 5] = [EvMethod::PercentComplete, EvMethod::PhysicalPercentComplete, EvMethod::ZeroHundred, EvMethod::FiftyFifty, EvMethod::LevelOfEffort];
     pub fn label(self) -> &'static str {
         match self {
             EvMethod::PercentComplete => "% Complete",
             EvMethod::PhysicalPercentComplete => "Physical % Complete",
+            EvMethod::ZeroHundred => "0/100",
+            EvMethod::FiftyFifty => "50/50",
+            EvMethod::LevelOfEffort => "Level of Effort",
+        }
+    }
+    /// For typing into the Earned Value Method column.
+    pub fn parse(s: &str) -> Option<EvMethod> {
+        let k: String = s.trim().to_lowercase().chars().filter(|c| c.is_alphanumeric() || *c == '%' || *c == '/').collect();
+        Some(match k.as_str() {
+            "%complete" | "percentcomplete" | "%" | "pct" => EvMethod::PercentComplete,
+            "physical%complete" | "physicalpercentcomplete" | "physical" => EvMethod::PhysicalPercentComplete,
+            "0/100" | "0100" => EvMethod::ZeroHundred,
+            "50/50" | "5050" => EvMethod::FiftyFifty,
+            "levelofeffort" | "loe" => EvMethod::LevelOfEffort,
+            _ => return None,
+        })
+    }
+}
+
+/// Earned value terms: the names PMI (PMBOK) and DoD EVMS (EIA-748,
+/// IPMDAR) use for the same quantities, or both, as Project shows them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EvTerms {
+    /// PV, EV, AC.
+    #[default]
+    Pmi,
+    /// BCWS, BCWP, ACWP.
+    Dod,
+    /// PV (BCWS), EV (BCWP), AC (ACWP).
+    Both,
+}
+
+impl EvTerms {
+    pub const ALL: [EvTerms; 3] = [EvTerms::Pmi, EvTerms::Dod, EvTerms::Both];
+    pub fn label(self) -> &'static str {
+        match self {
+            EvTerms::Pmi => "PMI (PV, EV, AC)",
+            EvTerms::Dod => "DoD EVMS (BCWS, BCWP, ACWP)",
+            EvTerms::Both => "Both (PV (BCWS), …)",
+        }
+    }
+}
+
+/// How the estimate at completion is forecast.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EacMethod {
+    /// EAC = AC + (BAC − EV) ÷ CPI: the rest costs what the work so far
+    /// did (Project's EAC field, and the usual one).
+    #[default]
+    Cpi,
+    /// EAC = AC + (BAC − EV) ÷ (CPI × SPI): cost and schedule performance
+    /// both carry on (the composite index).
+    CpiSpi,
+    /// EAC = AC + (BAC − EV): the rest goes to budget (the overrun so far
+    /// was a one-off).
+    BudgetRate,
+    /// EAC = the scheduled cost: actual cost plus what the plan says the
+    /// rest costs now (a bottom-up estimate).
+    Schedule,
+}
+
+impl EacMethod {
+    pub const ALL: [EacMethod; 4] = [EacMethod::Cpi, EacMethod::CpiSpi, EacMethod::BudgetRate, EacMethod::Schedule];
+    pub fn label(self) -> &'static str {
+        match self {
+            EacMethod::Cpi => "AC + (BAC − EV) ÷ CPI (Project's)",
+            EacMethod::CpiSpi => "AC + (BAC − EV) ÷ (CPI × SPI)",
+            EacMethod::BudgetRate => "AC + (BAC − EV)",
+            EacMethod::Schedule => "Scheduled cost (bottom-up)",
         }
     }
 }
@@ -584,6 +670,13 @@ pub struct Settings {
     pub level_within_slack: bool,
     /// Options ▸ Advanced ▸ Default task earned value method.
     pub default_ev_method: EvMethod,
+    /// Options ▸ Advanced ▸ Baseline for earned value calculations
+    /// (0 = Baseline, 1–10 = Baseline 1…10).
+    pub ev_baseline: u8,
+    /// The names earned value goes by: PMI, DoD, or both.
+    pub ev_terms: EvTerms,
+    /// How EAC is forecast.
+    pub eac_method: EacMethod,
 }
 
 impl Default for Settings {
@@ -604,6 +697,9 @@ impl Default for Settings {
             leveling_order: LevelingOrder::Standard,
             level_within_slack: false,
             default_ev_method: EvMethod::PercentComplete,
+            ev_baseline: 0,
+            ev_terms: EvTerms::Pmi,
+            eac_method: EacMethod::Cpi,
         }
     }
 }

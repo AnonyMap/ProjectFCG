@@ -24,6 +24,7 @@ pub mod release_dialogs;
 pub mod resource_dialogs;
 pub mod resource_sheet;
 pub mod risk_view;
+pub mod ev_view;
 pub mod tell_me;
 pub mod item_search;
 pub mod safety;
@@ -192,6 +193,7 @@ pub enum MainView {
     NetworkDiagram,
     Calendar,
     Risks,
+    EarnedValue,
 }
 
 impl MainView {
@@ -205,6 +207,7 @@ impl MainView {
             MainView::NetworkDiagram => "Network Diagram",
             MainView::Calendar => "Calendar",
             MainView::Risks => "Risk Register",
+            MainView::EarnedValue => "Earned Value",
         }
     }
 }
@@ -324,6 +327,7 @@ pub struct ProjectFcgApp {
     pub network: network::NetworkState,
     pub calendar: calendar_view::CalendarState,
     pub risk_view: risk_view::RiskViewState,
+    pub ev_view: ev_view::EvViewState,
     /// Search (Alt+Q).
     pub tell_me: tell_me::TellMe,
     /// Search the plan (Ctrl+E).
@@ -413,6 +417,7 @@ impl ProjectFcgApp {
             network: Default::default(),
             calendar: Default::default(),
             risk_view: Default::default(),
+            ev_view: Default::default(),
             tell_me: Default::default(),
             item_search: Default::default(),
             #[cfg(target_arch = "wasm32")]
@@ -2373,6 +2378,7 @@ impl ProjectFcgApp {
             MainView::NetworkDiagram => return network::show(self, ui, full),
             MainView::Calendar => return calendar_view::show(self, ui, full),
             MainView::Risks => return risk_view::show(self, ui, full),
+            MainView::EarnedValue => return ev_view::show(self, ui, full),
             MainView::Gantt => {}
         }
         let min_table = 120.0;
@@ -2493,7 +2499,7 @@ impl ProjectFcgApp {
                             }
                         }
                         MainView::Board => board::key(self, *key, *modifiers),
-                        MainView::Gantt | MainView::NetworkDiagram | MainView::Calendar | MainView::Risks => {}
+                        MainView::Gantt | MainView::NetworkDiagram | MainView::Calendar | MainView::Risks | MainView::EarnedValue => {}
                     }
                 }
                 egui::Event::Text(t) => {

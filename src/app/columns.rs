@@ -74,6 +74,10 @@ pub enum ColumnId {
     Eac,
     Vac,
     Tcpi,
+    SvPercent,
+    CvPercent,
+    Etc,
+    TcpiEac,
     /// The task's calendar (empty: the project calendar).
     TaskCalendar,
     /// Physical % Complete, and whether earned value uses it.
@@ -163,6 +167,10 @@ impl ColumnId {
         ColumnId::Eac,
         ColumnId::Vac,
         ColumnId::Tcpi,
+        ColumnId::SvPercent,
+        ColumnId::CvPercent,
+        ColumnId::Etc,
+        ColumnId::TcpiEac,
         ColumnId::BaselineNStart(1),
         ColumnId::BaselineNFinish(1),
         ColumnId::BaselineNStart(2),
@@ -246,7 +254,7 @@ impl ColumnId {
             BaselineStart | BaselineFinish | BaselineDuration | BaselineWork | BaselineCost | StartVariance | FinishVariance | DurationVariance => "Baseline & Variance",
             BaselineNStart(_) | BaselineNFinish(_) => "Baselines 1–10",
             Cost | FixedCost | ActualCost | RemainingCost => "Cost",
-            Bcws | Bcwp | Acwp | Sv | Cv | Spi | Cpi | Bac | Eac | Vac | Tcpi | EarnedValueMethod => "Earned Value",
+            Bcws | Bcwp | Acwp | Sv | Cv | Spi | Cpi | Bac | Eac | Vac | Tcpi | SvPercent | CvPercent | Etc | TcpiEac | EarnedValueMethod => "Earned Value",
             ResourceNames | ResourceInitials | Work | TaskType | EffortDriven | Overallocated => "Resources",
             Priority | LevelingDelay => "Leveling",
             Custom(_) => "Custom Fields",
@@ -294,12 +302,39 @@ impl ColumnId {
         self.static_title().to_string()
     }
 
-    /// The heading as this project shows it (custom fields by their alias).
+    /// The heading as this project shows it (custom fields by their alias,
+    /// earned value in the project's terms: PMI, DoD or both).
     pub fn title_in(&self, p: &Project) -> String {
         match self {
             ColumnId::Custom(f) => p.custom_title(*f),
-            _ => self.title(),
+            _ => match self.ev_metric() {
+                Some(m) => p.settings.ev_terms.abbr(m).to_string(),
+                None => self.title(),
+            },
         }
+    }
+
+    /// The earned value quantity a column shows.
+    pub fn ev_metric(&self) -> Option<crate::earned_value::Metric> {
+        use crate::earned_value::Metric as M;
+        Some(match self {
+            ColumnId::Bcws => M::Pv,
+            ColumnId::Bcwp => M::Ev,
+            ColumnId::Acwp => M::Ac,
+            ColumnId::Sv => M::Sv,
+            ColumnId::SvPercent => M::SvPercent,
+            ColumnId::Cv => M::Cv,
+            ColumnId::CvPercent => M::CvPercent,
+            ColumnId::Spi => M::Spi,
+            ColumnId::Cpi => M::Cpi,
+            ColumnId::Bac => M::Bac,
+            ColumnId::Eac => M::Eac,
+            ColumnId::Etc => M::Etc,
+            ColumnId::Vac => M::Vac,
+            ColumnId::Tcpi => M::Tcpi,
+            ColumnId::TcpiEac => M::TcpiEac,
+            _ => return None,
+        })
     }
 
     fn static_title(&self) -> &'static str {
@@ -327,6 +362,10 @@ impl ColumnId {
             ColumnId::Eac => "EAC",
             ColumnId::Vac => "VAC",
             ColumnId::Tcpi => "TCPI",
+            ColumnId::SvPercent => "SV%",
+            ColumnId::CvPercent => "CV%",
+            ColumnId::Etc => "ETC",
+            ColumnId::TcpiEac => "TCPI (EAC)",
             ColumnId::Indicators => "ℹ",
             ColumnId::Mode => "Task Mode",
             ColumnId::Name => "Task Name",
@@ -427,6 +466,10 @@ impl ColumnId {
             | ColumnId::Eac
             | ColumnId::Vac
             | ColumnId::Tcpi
+            | ColumnId::SvPercent
+            | ColumnId::CvPercent
+            | ColumnId::Etc
+            | ColumnId::TcpiEac
             | ColumnId::UniqueId => Align::RIGHT,
             ColumnId::Indicators | ColumnId::Mode => Align::Center,
             _ => Align::LEFT,
@@ -615,6 +658,10 @@ pub fn cell_text(p: &Project, row: usize, col: ColumnId) -> String {
         ColumnId::Eac => money(p, p.earned_value(row).eac()),
         ColumnId::Vac => money(p, p.earned_value(row).vac()),
         ColumnId::Tcpi => index(p.earned_value(row).tcpi()),
+        ColumnId::SvPercent => pct(p.earned_value(row).sv_percent()),
+        ColumnId::CvPercent => pct(p.earned_value(row).cv_percent()),
+        ColumnId::Etc => money(p, p.earned_value(row).etc()),
+        ColumnId::TcpiEac => index(p.earned_value(row).tcpi_eac()),
         ColumnId::BaselineNStart(n) => opt_date(t.baseline_slot(n as usize).map(|b| b.start)),
         ColumnId::BaselineNFinish(n) => opt_date(t.baseline_slot(n as usize).map(|b| b.finish)),
     }
@@ -627,6 +674,11 @@ fn money(p: &Project, v: f64) -> String {
 /// SPI/CPI/TCPI: two decimals, blank until defined (Project shows 0.00).
 fn index(v: Option<f64>) -> String {
     v.map(|x| format!("{x:.2}")).unwrap_or_else(|| "0.00".into())
+}
+
+/// SV% and CV%: whole percentages, 0% while undefined (as Project shows them).
+fn pct(v: Option<f64>) -> String {
+    format!("{}%", fmt_num(v.unwrap_or(0.0).round()))
 }
 
 /// Text placed in the editor when editing begins (more precise than the
@@ -779,8 +831,10 @@ pub fn set_cell(p: &mut Project, row: usize, col: ColumnId, text: &str) -> Resul
         ColumnId::EarnedValueMethod => {
             p.tasks[row].ev_method = crate::model::EvMethod::ALL
                 .into_iter()
-                .find(|m| m.label().eq_ignore_ascii_case(txt) || (txt.to_ascii_lowercase().starts_with("phys") && *m == crate::model::EvMethod::PhysicalPercentComplete))
-                .ok_or_else(|| format!("\"{txt}\" isn't an earned value method (% Complete or Physical % Complete)."))?;
+                .find(|m| m.label().eq_ignore_ascii_case(txt.trim()))
+                .or_else(|| crate::model::EvMethod::parse(txt))
+                .or_else(|| txt.to_ascii_lowercase().starts_with("phys").then_some(crate::model::EvMethod::PhysicalPercentComplete))
+                .ok_or_else(|| format!("\"{txt}\" isn't an earned value method (% Complete, Physical % Complete, 0/100, 50/50 or Level of Effort)."))?;
             Ok(())
         }
         ColumnId::EffortDriven => {
@@ -908,11 +962,13 @@ pub enum Table {
     Cost,
     Work,
     EarnedValue,
+    EarnedValueCost,
+    EarnedValueSchedule,
     Variance,
 }
 
 impl Table {
-    pub const ALL: [Table; 7] = [Table::Entry, Table::Schedule, Table::Tracking, Table::Cost, Table::Work, Table::EarnedValue, Table::Variance];
+    pub const ALL: [Table; 9] = [Table::Entry, Table::Schedule, Table::Tracking, Table::Cost, Table::Work, Table::EarnedValue, Table::EarnedValueCost, Table::EarnedValueSchedule, Table::Variance];
     pub fn label(self) -> &'static str {
         match self {
             Table::Entry => "Entry",
@@ -921,6 +977,8 @@ impl Table {
             Table::Cost => "Cost",
             Table::Work => "Work",
             Table::EarnedValue => "Earned Value",
+            Table::EarnedValueCost => "Earned Value Cost Indicators",
+            Table::EarnedValueSchedule => "Earned Value Schedule Indicators",
             Table::Variance => "Variance",
         }
     }
@@ -932,7 +990,10 @@ impl Table {
             Table::Tracking => vec![Indicators, Name, ActualStart, ActualFinish, PercentComplete, PhysicalPercentComplete, PercentWorkComplete, ActualDuration, RemainingDuration, ActualCost, ActualWork],
             Table::Cost => vec![Indicators, Name, FixedCost, Cost, BaselineCost, ActualCost, RemainingCost],
             Table::Work => vec![Indicators, Name, Work, BaselineWork, ActualWork, RemainingWork, PercentWorkComplete],
+            // Project's three earned value tables
             Table::EarnedValue => vec![Indicators, Name, Bcws, Bcwp, Acwp, Sv, Cv, Spi, Cpi, Bac, Eac, Vac],
+            Table::EarnedValueCost => vec![Indicators, Name, Bcws, Bcwp, Cv, CvPercent, Cpi, Bac, Eac, Vac, Tcpi],
+            Table::EarnedValueSchedule => vec![Indicators, Name, Bcws, Bcwp, Sv, SvPercent, Spi],
             Table::Variance => vec![Indicators, Name, Start, Finish, BaselineStart, BaselineFinish, StartVariance, FinishVariance],
         }
     }

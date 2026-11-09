@@ -351,45 +351,26 @@ fn statistics(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         ui.label(format!("Percent complete: Duration {}%   Work {}%", pct_dur.round(), if work > 0 { (act_work as f64 / work as f64 * 100.0).round() } else { 0.0 }));
         ui.separator();
         ui.label(RichText::new(format!("Earned value at {}", crate::model::fmt_date(status))).strong());
+        let terms = p.settings.ev_terms;
+        let both = |m: crate::earned_value::Metric| terms.long(m);
+        use crate::earned_value::Metric as M;
         egui::Grid::new("ev").num_columns(4).spacing([18.0, 6.0]).show(ui, |ui| {
-            ui.label("Planned value (BCWS)");
-            ui.label(money(ev.bcws));
-            ui.label("Schedule variance (SV)");
-            ui.label(money(ev.sv()));
-            ui.end_row();
-            ui.label("Earned value (BCWP)");
-            ui.label(money(ev.bcwp));
-            ui.label("Cost variance (CV)");
-            ui.label(money(ev.cv()));
-            ui.end_row();
-            ui.label("Actual cost (ACWP)");
-            ui.label(money(ev.acwp));
-            ui.label("SPI / CPI");
-            ui.label(format!("{} / {}", ev.spi().map(|v| format!("{v:.2}")).unwrap_or_else(|| "–".into()), ev.cpi().map(|v| format!("{v:.2}")).unwrap_or_else(|| "–".into())));
-            ui.end_row();
-            ui.label("Budget at completion (BAC)");
-            ui.label(money(ev.bac));
-            ui.label("Estimate at completion (EAC)");
-            ui.label(money(ev.eac()));
-            ui.end_row();
+            let ix = |v: Option<f64>| v.map(|v| format!("{v:.2}")).unwrap_or_else(|| "–".into());
+            for (a, av, b, bv) in [
+                (M::Pv, money(ev.bcws), M::Sv, money(ev.sv())),
+                (M::Ev, money(ev.bcwp), M::Cv, money(ev.cv())),
+                (M::Ac, money(ev.acwp), M::Spi, ix(ev.spi())),
+                (M::Bac, money(ev.bac), M::Cpi, ix(ev.cpi())),
+                (M::Eac, money(ev.eac()), M::Vac, money(ev.vac())),
+            ] {
+                ui.label(both(a));
+                ui.label(av);
+                ui.label(both(b));
+                ui.label(bv);
+                ui.end_row();
+            }
         });
-        let verdict = if ev.bac <= 0.0 {
-            "Set a baseline (Project ▸ Set Baseline) to measure earned value.".to_string()
-        } else {
-            let sched = match ev.spi() {
-                Some(v) if v < 0.95 => format!("behind schedule (SPI {v:.2}: {:.0}% of the planned work is done)", v * 100.0),
-                Some(v) if v > 1.05 => format!("ahead of schedule (SPI {v:.2})"),
-                Some(_) => "on schedule".into(),
-                None => "not started per the baseline yet".into(),
-            };
-            let cost = match ev.cpi() {
-                Some(v) if v < 0.95 => format!("over budget (every {} of work is costing {})", money(1.0), money(1.0 / v)),
-                Some(v) if v > 1.05 => format!("under budget (CPI {v:.2})"),
-                Some(_) => "on budget".into(),
-                None => "no actual cost yet".into(),
-            };
-            format!("The project is {sched}, and {cost}.")
-        };
+        let verdict = super::ev_view::verdict(&ev, terms, |v| money(v));
         ui.label(RichText::new(verdict).color(pal().text_dim));
         ui.add_space(6.0);
         ui.separator();
