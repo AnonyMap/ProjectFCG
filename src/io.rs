@@ -53,6 +53,7 @@ pub fn from_json(text: &str) -> Result<Project, String> {
     p.sanitize();
     p.repair_board();
     p.repair_risks();
+    p.repair_system();
     p.repair_calendars();
     p.repair_custom_fields();
     p.views.repair();

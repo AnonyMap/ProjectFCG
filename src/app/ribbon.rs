@@ -202,6 +202,11 @@ fn file_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         if big(ui, "💾", "Save As", "Save with a new name (F12)", true) {
             app.execute(Command::SaveAs, &ctx);
         }
+        ui.vertical(|ui| {
+            if check(ui, app.prefs.autosave, "AutoSave", &super::autosave_help()) {
+                app.execute(Command::ToggleAutoSave, &ctx);
+            }
+        });
     });
     group(ui, "Templates", |ui| {
         if big(ui, "⭐", "Sample\nProject", "Open a sample software-release schedule", true) {
@@ -771,6 +776,10 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             if big(ui, glyph, &shown, tip, true) && !selected {
                 app.execute(Command::ShowView(v), &ctx);
             }
+        }
+        // experimental (File ▸ Options ▸ Experimental features)
+        if app.prefs.experimental.system_diagram && big(ui, "🧩", "System\nDiagram", "Experimental: map what the project is building, and tie tasks, tickets, risks and measures to its parts", true) {
+            app.execute(Command::ShowView(MainView::System), &ctx);
         }
     });
     group(ui, "Data", |ui| {

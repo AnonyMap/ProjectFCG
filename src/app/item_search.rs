@@ -276,7 +276,7 @@ impl ProjectFcgApp {
     }
 
     /// One line about an item, for its row: (icon, title, details).
-    fn describe(&self, item: Item) -> (String, String, String) {
+    pub(crate) fn describe(&self, item: Item) -> (String, String, String) {
         let p = &self.project;
         let d = |x: Option<chrono::NaiveDateTime>| x.map(|d| d.format("%a %-m/%-d/%y").to_string()).unwrap_or_default();
         match item {

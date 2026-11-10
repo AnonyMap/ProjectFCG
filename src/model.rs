@@ -753,6 +753,10 @@ pub struct Project {
     pub risks: Vec<crate::risks::Risk>,
     #[serde(default)]
     pub risk_settings: crate::risks::RiskSettings,
+    /// The system diagram (experimental): elements, interfaces, and the work
+    /// tied to them.
+    #[serde(default)]
+    pub system: crate::system::SystemModel,
     #[serde(skip)]
     pub calc: ProjectCalc,
 }
@@ -817,6 +821,7 @@ impl Project {
             finish_date: None,
             risks: vec![],
             risk_settings: Default::default(),
+            system: Default::default(),
             calc: ProjectCalc::default(),
         }
     }

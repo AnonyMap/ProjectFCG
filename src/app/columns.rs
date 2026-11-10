@@ -31,6 +31,8 @@ pub enum ColumnId {
     Critical,
     Milestone,
     Notes,
+    /// The system diagram elements a task is tied to (experimental).
+    SystemElements,
     StartSlack,
     FinishSlack,
     BaselineStart,
@@ -123,6 +125,7 @@ impl ColumnId {
         ColumnId::Critical,
         ColumnId::Milestone,
         ColumnId::Notes,
+        ColumnId::SystemElements,
         ColumnId::TaskCalendar,
         ColumnId::PhysicalPercentComplete,
         ColumnId::EarnedValueMethod,
@@ -247,7 +250,7 @@ impl ColumnId {
     pub fn category(&self) -> &'static str {
         use ColumnId::*;
         match self {
-            Indicators | Mode | Name | Notes | Wbs | UniqueId | Milestone | Status => "General",
+            Indicators | Mode | Name | Notes | Wbs | UniqueId | Milestone | Status | SystemElements => "General",
             Duration | Start | Finish | Predecessors | Successors | ConstraintType | ConstraintDate | Deadline | EarlyStart | EarlyFinish | LateStart | LateFinish | TaskCalendar => "Schedule",
             TotalSlack | FreeSlack | StartSlack | FinishSlack | Critical => "Slack & Critical",
             PercentComplete | PhysicalPercentComplete | ActualStart | ActualFinish | ActualDuration | RemainingDuration | ActualWork | RemainingWork | PercentWorkComplete => "Tracking",
@@ -389,6 +392,7 @@ impl ColumnId {
             ColumnId::Critical => "Critical",
             ColumnId::Milestone => "Milestone",
             ColumnId::Notes => "Notes",
+            ColumnId::SystemElements => "System Elements",
             ColumnId::TaskCalendar => "Task Calendar",
             ColumnId::PhysicalPercentComplete => "Physical % Complete",
             ColumnId::EarnedValueMethod => "Earned Value Method",
@@ -420,7 +424,7 @@ impl ColumnId {
             ColumnId::Indicators => 26.0,
             ColumnId::Mode => 40.0,
             ColumnId::Name => 220.0,
-            ColumnId::Notes => 160.0,
+            ColumnId::Notes | ColumnId::SystemElements => 160.0,
             ColumnId::ResourceNames => 140.0,
             ColumnId::ConstraintType => 150.0,
             ColumnId::Wbs | ColumnId::UniqueId | ColumnId::Critical | ColumnId::Milestone => 64.0,
@@ -581,6 +585,7 @@ pub fn cell_text(p: &Project, row: usize, col: ColumnId) -> String {
         ColumnId::Critical => if c.critical { "Yes" } else { "No" }.into(),
         ColumnId::Milestone => if t.is_milestone() { "Yes" } else { "No" }.into(),
         ColumnId::Notes => t.notes.lines().next().unwrap_or("").to_string(),
+        ColumnId::SystemElements => p.system_names_of(crate::system::WorkLink::Task(t.uid)).join(", "),
         ColumnId::TaskCalendar => t.calendar.and_then(|u| p.base_calendar(u)).map(|c| c.name.clone()).unwrap_or_default(),
         ColumnId::Custom(f) => p.custom_text(row, f),
         ColumnId::StartSlack => dur_days(p, c.start_slack),
@@ -934,7 +939,12 @@ pub fn reset_cell(p: &mut Project, row: usize, col: ColumnId) -> Result<(), Stri
 pub fn insert_column_menu(ui: &mut egui::Ui, present: &[ColumnId], p: &Project) -> Option<ColumnId> {
     let mut picked = None;
     for cat in ColumnId::CATEGORIES {
-        let cols: Vec<ColumnId> = ColumnId::ALL.iter().copied().filter(|c| c.category() == cat && !present.contains(c)).collect();
+        // (System Elements only once the plan has a system diagram)
+        let cols: Vec<ColumnId> = ColumnId::ALL
+            .iter()
+            .copied()
+            .filter(|c| c.category() == cat && !present.contains(c) && (*c != ColumnId::SystemElements || !p.system.elements.is_empty()))
+            .collect();
         if cols.is_empty() {
             continue;
         }

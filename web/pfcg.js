@@ -3,6 +3,7 @@
 // System Access API where there is one (Chrome, Edge), else uploads and
 // downloads; preferences and AutoRecover go to localStorage.
 let pfcgHandle = null;   // the open project's file, when the browser can save to it
+let pfcgWritable = false; // written to (or picked in Save As) since it was opened: no prompt needed
 let pfcgDirty = false;
 window.addEventListener('beforeunload', (e) => { if (pfcgDirty) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -33,7 +34,11 @@ const PFCG_ACCEPT = { project: '.pfcg,.ganttry,.gantry,.xml', csv: '.csv' };
 
 function pfcg_can_save_in_place() { return 'showSaveFilePicker' in window; }
 function pfcg_has_handle() { return pfcgHandle !== null; }
-function pfcg_forget_handle() { pfcgHandle = null; }
+// AutoSave writes only when no permission prompt can appear: browsers ask
+// only in answer to a click, so a file that was opened (read permission)
+// waits for its first Save.
+function pfcg_can_write_quietly() { return pfcgHandle !== null && pfcgWritable; }
+function pfcg_forget_handle() { pfcgHandle = null; pfcgWritable = false; }
 function pfcg_set_title(t) { document.title = t; }
 function pfcg_set_dirty(d) { pfcgDirty = d; }
 
@@ -57,7 +62,7 @@ async function pfcg_open(kind) {
       const [h] = await window.showOpenFilePicker({ id: 'pfcg', types: PFCG_TYPES[kind] || [] });
       const f = await h.getFile();
       const bytes = new Uint8Array(await f.arrayBuffer());
-      if (kind === 'project') pfcgHandle = /\.pfcg$/i.test(f.name) ? h : null;
+      if (kind === 'project') { pfcgHandle = /\.pfcg$/i.test(f.name) ? h : null; pfcgWritable = false; }
       return { name: f.name, bytes };
     } catch (e) { if (e.name === 'AbortError') return null; throw e; }
   }
@@ -67,7 +72,7 @@ async function pfcg_open(kind) {
     i.onchange = async () => {
       const f = i.files[0];
       if (!f) return resolve(null);
-      if (kind === 'project') pfcgHandle = null;
+      if (kind === 'project') { pfcgHandle = null; pfcgWritable = false; }
       try { resolve({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) }); } catch (e) { reject(e); }
     };
     i.oncancel = () => resolve(null);
@@ -82,7 +87,7 @@ async function pfcg_save_as(name, data, kind, mime) {
     try {
       const h = await window.showSaveFilePicker({ id: 'pfcg-' + kind, suggestedName: name, types: PFCG_TYPES[kind] || [] });
       await pfcg_write(h, bytes);
-      if (kind === 'pfcg') pfcgHandle = h;
+      if (kind === 'pfcg') { pfcgHandle = h; pfcgWritable = true; }
       return h.name;
     } catch (e) { if (e.name === 'AbortError') return null; throw e; }
   }
@@ -95,8 +100,10 @@ async function pfcg_save_as(name, data, kind, mime) {
 async function pfcg_save(data) {
   if (!pfcgHandle) return null;
   const bytes = data.slice();
-  await pfcg_write(pfcgHandle, bytes);
-  return pfcgHandle.name;
+  const h = pfcgHandle;
+  await pfcg_write(h, bytes);
+  if (h === pfcgHandle) pfcgWritable = true;
+  return h.name;
 }
 
 // Print: the PDF in a new tab, where the browser's viewer prints it.

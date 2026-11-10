@@ -126,6 +126,10 @@ pub struct OptionsDlg {
     /// Save ▸ AutoRecover every N minutes (0: off). A preference of this
     /// computer, not of the plan.
     pub autorecover: u32,
+    /// AutoSave (a preference, not the project's).
+    pub autosave: bool,
+    /// Experimental features (preferences).
+    pub system_diagram: bool,
     pub ev_method: crate::model::EvMethod,
     /// Earned value options for this project.
     pub ev_baseline: u8,
@@ -354,6 +358,8 @@ impl Dialogs {
             auto_add: s.auto_add_resources,
             currency: s.currency_symbol.clone(),
             autorecover: 5,
+            autosave: false,
+            system_diagram: false,
             ev_method: s.default_ev_method,
             ev_baseline: s.ev_baseline.min(10),
             ev_terms: s.ev_terms,
@@ -1499,6 +1505,9 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
                 ui.weak(if st.autorecover == 0 { "off" } else { "a copy of unsaved work, for after a crash" });
             });
             ui.end_row();
+            ui.label("");
+            ui.checkbox(&mut st.autosave, "AutoSave: save to the plan's file a few seconds after each change").on_hover_text(super::autosave_help());
+            ui.end_row();
         });
         ui.add_space(6.0);
         ui.label(RichText::new("Earned value options for this project").strong());
@@ -1540,6 +1549,9 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
             });
             ui.end_row();
         });
+        ui.add_space(6.0);
+        ui.label(RichText::new("Experimental features").strong()).on_hover_text("Features still being worked out. They may change, and plans that use them keep working in versions without them (the data is kept, not shown).");
+        ui.checkbox(&mut st.system_diagram, "System Diagram: map what the project is building (View ▸ System Diagram)");
         if let Some(e) = &st.error {
             ui.colored_label(pal().warn, e);
         }
@@ -1561,8 +1573,13 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
         app.dialogs.options = Some(st);
         return;
     };
-    if app.prefs.autorecover_minutes != st.autorecover {
+    if app.prefs.autorecover_minutes != st.autorecover || app.prefs.autosave != st.autosave || app.prefs.experimental.system_diagram != st.system_diagram {
         app.prefs.autorecover_minutes = st.autorecover.min(120);
+        app.prefs.autosave = st.autosave;
+        app.prefs.experimental.system_diagram = st.system_diagram;
+        if !st.system_diagram && app.view.main == super::MainView::System {
+            app.view.main = super::MainView::Gantt;
+        }
         app.save_prefs();
     }
     let s2 = st.clone();
