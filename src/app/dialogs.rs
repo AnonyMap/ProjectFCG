@@ -1563,10 +1563,16 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     if cancel || keys.esc {
         return;
     }
-    if !ok {
-        app.dialogs.options = Some(st);
-        return;
+    app.dialogs.options = Some(st);
+    if ok {
+        apply_options(app);
     }
+}
+
+/// Options ▸ OK: apply the dialog's settings (it stays open with a message
+/// when one is invalid).
+pub fn apply_options(app: &mut ProjectFcgApp) {
+    let Some(mut st) = app.dialogs.options.take() else { return };
     use chrono::Timelike;
     let (Some(ts), Some(tf)) = (parse_time(&st.start_time), parse_time(&st.finish_time)) else {
         st.error = Some("Enter valid default start and end times.".into());

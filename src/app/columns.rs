@@ -936,14 +936,14 @@ pub fn reset_cell(p: &mut Project, row: usize, col: ColumnId) -> Result<(), Stri
 }
 
 /// Insert Column menu, grouped by category. Returns the column picked.
-pub fn insert_column_menu(ui: &mut egui::Ui, present: &[ColumnId], p: &Project) -> Option<ColumnId> {
+pub fn insert_column_menu(ui: &mut egui::Ui, present: &[ColumnId], p: &Project, system: bool) -> Option<ColumnId> {
     let mut picked = None;
     for cat in ColumnId::CATEGORIES {
-        // (System Elements only once the plan has a system diagram)
+        // (System Elements only with the System Diagram turned on)
         let cols: Vec<ColumnId> = ColumnId::ALL
             .iter()
             .copied()
-            .filter(|c| c.category() == cat && !present.contains(c) && (*c != ColumnId::SystemElements || !p.system.elements.is_empty()))
+            .filter(|c| c.category() == cat && !present.contains(c) && (*c != ColumnId::SystemElements || system))
             .collect();
         if cols.is_empty() {
             continue;

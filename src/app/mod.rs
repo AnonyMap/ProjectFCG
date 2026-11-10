@@ -1090,11 +1090,7 @@ impl ProjectFcgApp {
             match cmd {
                 DeleteTasks | DeleteKey => return self.delete_system_selection(),
                 InsertTask => {
-                    let st = &self.system_view;
-                    let k = st.new_kind;
-                    let s = k.default_size();
-                    let c = (egui::vec2(500.0, 300.0) - st.offset) / st.zoom;
-                    self.add_system_element(k, [c.x - s[0] / 2.0, c.y - s[1] / 2.0]);
+                    self.add_system_element_in_view();
                     return;
                 }
                 Copy | Cut | Paste | Indent | Outdent | MoveUp | MoveDown | LinkTasks | UnlinkTasks | FillDown | ResetField | InsertSummary | InsertMilestone | InsertRecurring | EditCell | TaskInfo | Find | FindNext => return,
@@ -2863,12 +2859,19 @@ pub fn baseline_name(n: usize) -> String {
 pub const AUTOSAVE_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// AutoSave's progress: the change it is waiting to save.
-#[derive(Default)]
 pub struct AutoSaveState {
     gen: Option<u64>,
     since: Option<web_time::Instant>,
     /// A save failed: wait for the next Save before trying again.
     pub paused: bool,
+    /// How long after the last change it saves.
+    pub delay: std::time::Duration,
+}
+
+impl Default for AutoSaveState {
+    fn default() -> Self {
+        AutoSaveState { gen: None, since: None, paused: false, delay: AUTOSAVE_DELAY }
+    }
 }
 
 /// What AutoSave does here (its tooltip).
@@ -2927,8 +2930,8 @@ impl ProjectFcgApp {
         }
         let Some(since) = self.autosave.since else { return };
         let waited = since.elapsed();
-        if waited < AUTOSAVE_DELAY {
-            ctx.request_repaint_after(AUTOSAVE_DELAY - waited);
+        if waited < self.autosave.delay {
+            ctx.request_repaint_after(self.autosave.delay - waited);
             return;
         }
         // not in the middle of typing a value or answering a dialog

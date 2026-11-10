@@ -237,6 +237,18 @@ fn earned_value(app: &mut ProjectFcgApp, ctx: &egui::Context) {
     app.ev_view.rows = projectfcg::app::ev_view::RowLevel::Level2;
 }
 
+/// System Diagram (experimental): the sample's parts, interfaces, work and
+/// measures, coloured by health, with the API selected.
+fn system(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.prefs.experimental.system_diagram = true;
+    app.tab = RibbonTab::View;
+    app.recalc();
+    app.execute(Command::ShowView(MainView::System), ctx);
+    app.system_view.color_by = projectfcg::app::system_view::ColorBy::Health;
+    let api = app.project.system.elements.iter().find(|e| e.name == "API service").map(|e| e.id).unwrap();
+    app.system_view.sel = projectfcg::app::system_view::Sel::Element(api);
+}
+
 /// Search (Alt+Q): "add a dependency" finds Link Tasks, with where it lives
 /// and its shortcut.
 fn search(app: &mut ProjectFcgApp, ctx: &egui::Context) {
@@ -289,6 +301,7 @@ const SCENES: &[Scene] = &[
     Scene { name: "sort", agile: false, setup: sort },
     Scene { name: "risks", agile: false, setup: risks },
     Scene { name: "earned-value", agile: false, setup: earned_value },
+    Scene { name: "system-diagram", agile: false, setup: system },
     Scene { name: "search", agile: false, setup: search },
     Scene { name: "item-search", agile: false, setup: item_search },
 ];

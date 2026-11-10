@@ -131,8 +131,66 @@ pub fn software_release() -> Project {
     }
     p.tasks[16].fixed_cost = 500.0;
     sample_risks(&mut p);
+    sample_system(&mut p);
     schedule(&mut p);
     p
+}
+
+/// The sample's system diagram (shown with the experimental System
+/// Diagram turned on): what Release 2.0 is made of, how the parts connect,
+/// the work and risks behind each, and what each must achieve.
+fn sample_system(p: &mut Project) {
+    use crate::system::{Element, ElementKind as K, ElementState as S, Flow, InterfaceKind as I, Measure, WorkLink};
+    let task = |p: &Project, name: &str| WorkLink::Task(p.tasks.iter().find(|t| t.name == name).expect("sample task").uid);
+    let risk = |p: &Project, title: &str| WorkLink::Risk(p.risks.iter().find(|r| r.title == title).expect("sample risk").id);
+    let measure = |name: &str, unit: &str, current: f64, target: f64, threshold: f64| Measure {
+        name: name.into(),
+        unit: unit.into(),
+        current: Some(current),
+        target: Some(target),
+        threshold: Some(threshold),
+        lower_is_better: true,
+    };
+    let el = |kind, name: &str, state, pos: [f32; 2], size: [f32; 2], work: Vec<WorkLink>, measures: Vec<Measure>| Element { kind, name: name.into(), state, pos, size, work, measures, ..Default::default() };
+    let web = el(K::Software, "Web app", S::Build, [40.0, 80.0], [200.0, 90.0], vec![task(p, "Frontend UI")], vec![measure("Page load", "s", 2.4, 2.0, 3.0)]);
+    let api = el(
+        K::Software,
+        "API service",
+        S::Build,
+        [290.0, 80.0],
+        [200.0, 90.0],
+        vec![task(p, "Backend API"), task(p, "Performance testing"), risk(p, "Load test misses peak traffic")],
+        vec![measure("p95 latency", "ms", 180.0, 200.0, 300.0)],
+    );
+    let db = el(K::Component, "Database", S::Design, [540.0, 80.0], [190.0, 90.0], vec![task(p, "Database migration"), risk(p, "Migration corrupts legacy records")], vec![]);
+    let ship = el(
+        K::Subsystem,
+        "Release & docs",
+        S::Concept,
+        [40.0, 210.0],
+        [450.0, 100.0],
+        vec![task(p, "User documentation"), task(p, "Release candidate build"), task(p, "Production deployment")],
+        vec![],
+    );
+    let users = el(K::External, "Customers", S::Fielded, [40.0, 400.0], [200.0, 70.0], vec![], vec![]);
+    let pay = el(K::External, "Payment provider", S::Fielded, [800.0, 80.0], [190.0, 70.0], vec![], vec![]);
+    let s = &mut p.system;
+    let sys = s.add_element(Element { kind: K::System, name: "Release 2.0".into(), state: S::Build, pos: [0.0, 0.0], size: [760.0, 340.0], ..Default::default() });
+    let _ = sys;
+    let [web, api, db, _ship, users, pay] = [web, api, db, ship, users, pay].map(|e| s.add_element(e));
+    for (a, b, kind, label, flow) in [
+        (users, web, I::Human, "Uses", Flow::Forward),
+        (web, api, I::Data, "REST / JSON", Flow::Both),
+        (api, db, I::Data, "SQL", Flow::Forward),
+        (api, pay, I::Data, "Payments", Flow::Both),
+    ] {
+        if let Ok(id) = s.connect(a, b, kind) {
+            if let Some(f) = s.interface_mut(id) {
+                f.label = label.into();
+                f.flow = flow;
+            }
+        }
+    }
 }
 
 /// A small DoD-style register for the sample: risks tied to tasks, a

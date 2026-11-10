@@ -78,12 +78,21 @@ pub struct SystemViewState {
     pub color_by: ColorBy,
     /// The panel's "link work" search.
     pub link_query: String,
+    /// Where the canvas was last drawn (screen).
+    pub canvas: Rect,
     drag: Option<Drag>,
     fitted: bool,
     focus_name: bool,
     /// (what it was, what it is now) for the selection.
     draft: Option<(Draft, Draft)>,
     cache: Option<Cache>,
+}
+
+impl SystemViewState {
+    /// The panel's unsaved edits (saved once nothing is being typed).
+    pub fn draft_mut(&mut self) -> Option<&mut (Draft, Draft)> {
+        self.draft.as_mut()
+    }
 }
 
 impl Default for SystemViewState {
@@ -96,6 +105,7 @@ impl Default for SystemViewState {
             new_kind: ElementKind::Component,
             color_by: ColorBy::Kind,
             link_query: String::new(),
+            canvas: Rect::NOTHING,
             drag: None,
             fitted: false,
             focus_name: false,
@@ -274,6 +284,16 @@ impl ProjectFcgApp {
         Some(id)
     }
 
+    /// Add an element of the chosen kind in the middle of the canvas.
+    pub fn add_system_element_in_view(&mut self) -> Option<u32> {
+        let st = &self.system_view;
+        let size = if st.canvas.is_positive() { st.canvas.size() } else { vec2(800.0, 500.0) };
+        let c = (size / 2.0 - st.offset) / st.zoom;
+        let k = st.new_kind;
+        let s = k.default_size();
+        self.add_system_element(k, [c.x - s[0] / 2.0, c.y - s[1] / 2.0])
+    }
+
     /// Connect two elements and select the interface.
     pub fn connect_system(&mut self, from: u32, to: u32) -> Option<u32> {
         self.commit_system_draft();
@@ -354,7 +374,7 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui, rect: Rect) {
     let pal = super::theme::pal();
     ui.painter().rect_filled(rect, 0.0, pal.bg);
     let bar = Rect::from_min_size(rect.min, vec2(rect.width(), 36.0));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(10.0, 4.0))), |ui| toolbar(app, ui, rect));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(10.0, 4.0))), |ui| toolbar(app, ui));
     ui.painter().hline(rect.x_range(), bar.bottom(), Stroke::new(1.0, pal.grid));
     let body = Rect::from_min_max(pos2(rect.left(), bar.bottom() + 1.0), rect.max);
     let panel_w = PANEL_W.min(body.width() * 0.45);
@@ -391,7 +411,7 @@ fn fit(app: &mut ProjectFcgApp, canvas: Rect) {
     app.system_view.offset = canvas.size() / 2.0 - centre * z;
 }
 
-fn toolbar(app: &mut ProjectFcgApp, ui: &mut egui::Ui, whole: Rect) {
+fn toolbar(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
     ui.horizontal_centered(|ui| {
         ui.label(RichText::new("System Diagram").strong().size(super::theme::text_size() + 2.0));
         ui.label(RichText::new("experimental").small().color(super::theme::pal().text_dim));
@@ -402,10 +422,7 @@ fn toolbar(app: &mut ProjectFcgApp, ui: &mut egui::Ui, whole: Rect) {
             }
         });
         if ui.button("+ Add").on_hover_text("Add an element (or double-click the background)").clicked() {
-            let st = &app.system_view;
-            let c = (whole.size() / 2.0 - st.offset) / st.zoom;
-            let s = st.new_kind.default_size();
-            app.add_system_element(st.new_kind, [c.x - s[0] / 2.0, c.y - s[1] / 2.0]);
+            app.add_system_element_in_view();
         }
         let pair: Option<(u32, u32)> = match (app.system_view.sel, app.system_view.also.as_slice()) {
             (Sel::Element(a), [b]) if a != *b => Some((*b, a)),
@@ -454,6 +471,7 @@ fn interface_at(segs: &[(u32, Pos2, Pos2)], p: Pos2) -> Option<u32> {
 
 fn canvas_ui(app: &mut ProjectFcgApp, ui: &mut egui::Ui, canvas: Rect) {
     let pal = super::theme::pal();
+    app.system_view.canvas = canvas;
     let painter = ui.painter_at(canvas);
     let resp = ui.interact(canvas, ui.scope_id().with("system_canvas"), Sense::click_and_drag());
     let z = app.system_view.zoom;
@@ -731,12 +749,6 @@ fn canvas_ui(app: &mut ProjectFcgApp, ui: &mut egui::Ui, canvas: Rect) {
         if let Some(ru) = if_rollups.get(id).filter(|r| r.tasks + r.tickets + r.risks > 0) {
             painter.circle_filled(mid, 5.0 * z.max(0.6), health_color(ru.health()));
         }
-        if !f.label.is_empty() && base_font >= 6.0 {
-            let g = painter.layout_no_wrap(f.label.clone(), FontId::proportional(base_font * 0.85), pal.text);
-            let lr = Rect::from_center_size(mid - vec2(0.0, 12.0 * z), g.size() + vec2(8.0, 2.0));
-            painter.rect_filled(lr, 3.0, pal.bg);
-            painter.galley(lr.min + vec2(4.0, 1.0), g, pal.text);
-        }
     }
     // everything else
     for e in sys.elements.iter().filter(|e| !e.kind.is_container()) {
@@ -790,6 +802,18 @@ fn canvas_ui(app: &mut ProjectFcgApp, ui: &mut egui::Ui, canvas: Rect) {
                     painter.circle_stroke(r.right_top() + vec2(-21.0, 9.0) * z, 4.0 * z.max(0.6), Stroke::new(1.5, measure_color(ru.worst_measure)));
                 }
             }
+        }
+    }
+    // interface labels, on top so elements don't hide them
+    if base_font >= 6.0 {
+        for (id, a, b) in &segs {
+            let Some(f) = sys.interface(*id).filter(|f| !f.label.is_empty()) else { continue };
+            let mid = pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+            let g = painter.layout_no_wrap(f.label.clone(), FontId::proportional(base_font * 0.85), pal.text);
+            let lr = Rect::from_center_size(mid - vec2(0.0, 11.0 * z), g.size() + vec2(8.0, 2.0));
+            painter.rect_filled(lr, 3.0, pal.bg.gamma_multiply(0.92));
+            painter.rect_stroke(lr, 3.0, Stroke::new(1.0, interface_color(f.kind).gamma_multiply(0.5)), StrokeKind::Inside);
+            painter.galley(lr.min + vec2(4.0, 1.0), g, pal.text);
         }
     }
     // the selection's handles
@@ -1133,7 +1157,7 @@ fn measures_ui(ui: &mut egui::Ui, ms: &mut Vec<Measure>) {
                 let (dot, resp) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 5.0, measure_color(m.status()));
                 resp.on_hover_text(m.status().label());
-                ui.add(egui::TextEdit::singleline(&mut m.name).hint_text("Name").desired_width(78.0));
+                ui.add(egui::TextEdit::singleline(&mut m.name).hint_text("Name").desired_width(104.0));
                 for v in [&mut m.current, &mut m.target, &mut m.threshold] {
                     num_field(ui, v);
                 }
@@ -1164,7 +1188,7 @@ fn measures_ui(ui: &mut egui::Ui, ms: &mut Vec<Measure>) {
 fn num_field(ui: &mut egui::Ui, v: &mut Option<f64>) {
     let id = ui.next_auto_id();
     let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| v.map(crate::duration::fmt_num).unwrap_or_default());
-    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(46.0));
+    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(42.0));
     if r.has_focus() {
         ui.data_mut(|d| d.insert_temp(id, text.clone()));
         let t = text.trim().replace(',', "");

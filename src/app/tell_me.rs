@@ -285,7 +285,7 @@ pub fn catalog() -> Vec<Action> {
         ("view_network", "🕸", "Network Diagram", "pert boxes dependencies flow chart view", Cmd(Command::ShowView(V::NetworkDiagram))),
         ("view_calendar", "📅", "Calendar View", "month calendar view schedule", Cmd(Command::ShowView(V::Calendar))),
         ("view_ev", "💹", "Earned Value", "evm earned value s-curve s curve over time report pv ev ac bcws bcwp acwp spi cpi eac vac tcpi ipmdar cpr format 1 performance terms dod pmi view", Cmd(Command::ShowView(V::EarnedValue))),
-        ("view_system", "🧩", "System Diagram (experimental)", "system diagram architecture block diagram systems engineering mbse sysml interfaces components subsystems icd n2 tpm technical performance measures outcome map view", Cmd(Command::ShowView(V::System))),
+        ("view_system", "🖧", "System Diagram (experimental)", "system diagram architecture block diagram systems engineering mbse sysml interfaces components subsystems icd n2 tpm technical performance measures outcome map view", Cmd(Command::ShowView(V::System))),
         ("view_risks", "⚠", "Risk Register", "risks risk matrix heat map issues opportunities raid log dod pmi view", Cmd(Command::ShowView(V::Risks))),
         ("view_board", "📋", "Board", "kanban scrum sprint backlog tickets agile view", Cmd(Command::ShowView(V::Board))),
         ("view_task_usage", "📊", "Task Usage", "assignments work hours per day view", Cmd(Command::ShowView(V::TaskUsage))),

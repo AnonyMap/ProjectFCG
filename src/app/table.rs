@@ -730,7 +730,7 @@ fn paint_header(app: &mut ProjectFcgApp, ui: &mut egui::Ui, painter: &Painter, r
             ui.separator();
             ui.menu_button("Insert Column", |ui| {
                 let present: Vec<_> = app.columns.iter().map(|s| s.id).collect();
-                if let Some(c) = super::columns::insert_column_menu(ui, &present, &app.project) {
+                if let Some(c) = super::columns::insert_column_menu(ui, &present, &app.project, app.prefs.experimental.system_diagram) {
                     app.columns.insert(k, super::ColumnState { id: c, width: c.default_width() });
                     ui.close();
                 }
