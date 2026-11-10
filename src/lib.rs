@@ -27,6 +27,7 @@ pub mod resources;
 pub mod risks;
 pub mod sanitize;
 pub mod schedule;
+pub mod system;
 pub mod tracking;
 pub mod views;
 

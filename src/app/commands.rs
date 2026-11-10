@@ -257,6 +257,8 @@ pub enum Command {
     SetThemeMode(super::theme::ThemeMode),
     SetAccent(super::theme::Accent),
     ToggleDarkMode,
+    /// File ▸ AutoSave.
+    ToggleAutoSave,
     // Resources
     ShowView(super::MainView),
     AssignResources,

@@ -202,6 +202,11 @@ fn file_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         if big(ui, "💾", "Save As", "Save with a new name (F12)", true) {
             app.execute(Command::SaveAs, &ctx);
         }
+        ui.vertical(|ui| {
+            if check(ui, app.prefs.autosave, "AutoSave", &super::autosave_help()) {
+                app.execute(Command::ToggleAutoSave, &ctx);
+            }
+        });
     });
     group(ui, "Templates", |ui| {
         if big(ui, "⭐", "Sample\nProject", "Open a sample software-release schedule", true) {
@@ -772,6 +777,10 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
                 app.execute(Command::ShowView(v), &ctx);
             }
         }
+        // experimental (File ▸ Options ▸ Experimental features)
+        if app.prefs.experimental.system_diagram && big(ui, "🖧", "System\nDiagram", "Experimental: map what the project is building, and tie tasks, tickets, risks and measures to its parts", true) {
+            app.execute(Command::ShowView(MainView::System), &ctx);
+        }
     });
     group(ui, "Data", |ui| {
         ui.vertical(|ui| {
@@ -1017,7 +1026,7 @@ fn format_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.menu_button(RichText::new("➕ Insert Column").size(12.0), |ui| {
                 let present: Vec<_> = app.columns.iter().map(|s| s.id).collect();
-                if let Some(c) = super::columns::insert_column_menu(ui, &present, &app.project) {
+                if let Some(c) = super::columns::insert_column_menu(ui, &present, &app.project, app.prefs.experimental.system_diagram) {
                     let at = (app.active_col + 1).min(app.columns.len());
                     let w = (c.default_width() * app.prefs.text_size / DEFAULT_TEXT_SIZE).round();
                     app.columns.insert(at, super::ColumnState { id: c, width: w });

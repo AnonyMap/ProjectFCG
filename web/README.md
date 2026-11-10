@@ -20,7 +20,8 @@ The same file is also published as `index.html`, ready to host (GitHub Pages, sa
 ## Files and saving
 
 - **In Chrome and Edge**, Open and Save As use the system file dialogs. Save writes back to the same file, and the first save to a file asks permission once. The browser writes to a temporary file and swaps it in when complete, so a failed save leaves the old file intact.
-- **In Firefox and Safari**, Open uploads a file and Save downloads a copy.
+- **AutoSave** (on by default in the browser) then saves into the file a few seconds after each change, with no dialog. It starts after the plan's first Save or Save As in the tab, because browsers only ask for permission to change a file in answer to a click. If a background save fails (the file was moved, say), AutoSave pauses until the next Save.
+- **In Firefox and Safari**, Open uploads a file and Save downloads a copy, every time. These browsers don't have the File System Access API, so a page can't write into a file on disk, and that includes the HTML file rewriting itself. AutoRecover still keeps unsaved work in the browser. Brave has the API behind a flag: `brave://flags/#file-system-access-api`.
 - **AutoRecover** keeps a copy of unsaved work in the browser's storage 10 seconds after the last change. If the tab closes without saving, the next visit offers to recover it.
 - **Closing the tab** with unsaved changes makes the browser ask first.
 - **Print** opens the PDF in a new tab, where the browser prints it.

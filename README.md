@@ -35,11 +35,11 @@ Download the latest file for your system from the [Releases page](https://github
 **In a browser, with nothing to install**
 
 - Download `ProjectFCG-…-web.html` and double-click it. It opens in Chrome or Edge straight from disk, with no web server and no internet connection. It's the whole app in one 5 MB file, so it works where installing software isn't allowed.
-- **Saving works as on the desktop.** Ctrl+S writes back to the file you opened (Chrome asks once per file for permission to save to it). Unsaved work is kept in the browser and offered back if the tab closes, and closing the tab with unsaved changes asks first.
+- **Saving works as on the desktop in Chrome and Edge.** Ctrl+S writes back to the file you opened (the browser asks once per file for permission to save to it), and **AutoSave** then keeps the file saved in the background a few seconds after each change. Unsaved work is also kept in the browser and offered back if the tab closes, and closing the tab with unsaved changes asks first.
+- **Firefox and Safari can't write into files.** They don't have the File System Access API, so a web page can only hand them a download. There, each Save downloads a new copy and AutoSave can't keep a file up to date. Use Chrome or Edge, or the desktop app. In Brave, turn on `brave://flags/#file-system-access-api`.
 - **What's different:**
   - Ctrl+N, Ctrl+W and Ctrl+T belong to the browser, so use File ▸ New.
   - Very large plans pause the page while they level.
-  - In Firefox and Safari, Save downloads a copy instead of updating the file.
 - More detail is in [web/README.md](web/README.md).
 
 **From source**
@@ -181,12 +181,26 @@ Earned value is calculated the way Microsoft Project does it, at the status date
 
 ![The Risk Register: a DoD register, the 5×5 risk and opportunity matrices, and a risk's If/then statement](docs/risks.png)
 
+### System diagram (experimental)
+
+Cost and schedule say whether the work is on time and on budget, not whether the thing being built will work. The system diagram maps what the project is building, and ties the work to its parts. Turn it on in **File ▸ Options ▸ Experimental features**, then open **View ▸ System Diagram**.
+
+- **Freeform:** systems, subsystems, components, software, external systems, functions, groups and notes, placed anywhere. An element dropped inside a system, subsystem or group belongs to it and moves with it.
+- **Interfaces** between elements (data, signal, power, mechanical, fluid, thermal, human), one-way, both ways or undirected, with a name. Drag a selected element's round handle onto another to connect them.
+- **Tie the work to the parts:** Gantt tasks (a summary brings its subtasks), Board tickets (stories, epics, bugs) and risks. Their progress, lateness and ratings roll up into the element and into whatever it sits in. A System Elements column shows each task's parts.
+- **Measures:** technical performance measures (range, weight, latency…) with a current value, a target and a threshold, more or less being better.
+- **Health at a glance:** each element is on track, needs watching or is in trouble, from its late tasks, its worst open risk and its worst measure. Colour the diagram by kind, health or state (concept to fielded).
+- The sample plan has a small diagram to explore.
+
+![The System Diagram: the sample's parts coloured by health, with the API service's work, risk and latency measure](docs/system-diagram.png)
+
 ### Files and sharing
 
 - **Native files:** `.pfcg`, which is readable JSON.
 - **Microsoft Project XML** in and out. Project, ProjectLibre and other MPXJ-based tools open it.
 - **Print or PDF:** the view as it is, on as many pages as it needs.
 - **Copy Picture** of the view, and **CSV** export of the tasks or the risk register.
+- **AutoSave** (File tab) saves a plan that has a file a few seconds after each change. It's on by default in the browser and off on the desktop.
 - **Reliability:** AutoRecover, saves that can't leave a half-written file, and recovery from internal errors without closing the window.
 
 | | |
@@ -264,7 +278,7 @@ Undo (Ctrl+Z) covers every edit. **F1** lists all keyboard shortcuts, which are 
 
 **Structure.** The scheduling engine (`src/*.rs`) is a library with no user interface: calendars, the critical-path scheduler, resources and leveling, tracking, the board, risks, and file formats. The desktop app (`src/app/`) sits on top of it. That separation is what lets the tests drive the engine directly and the real interface without a window.
 
-**How correctness is checked.** 443 automated tests run on every release:
+**How correctness is checked.** 453 automated tests run on every release:
 
 - **Hand-derived expectations:** scheduling tests whose dates were worked out by hand from Project's rules.
 - **Reference implementations:** the fast calendar arithmetic and the fast leveler are compared with slow, obviously-correct versions on thousands of random cases.

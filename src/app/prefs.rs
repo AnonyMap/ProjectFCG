@@ -21,6 +21,20 @@ pub struct Prefs {
     pub autorecover_minutes: u32,
     /// Search (Alt+Q): the actions used most recently, newest first.
     pub recent_actions: Vec<String>,
+    /// File ▸ AutoSave: save a plan that has a file a few seconds after
+    /// each change. On by default in a browser (where Save can't be the
+    /// habit it is on a desktop), off on the desktop.
+    pub autosave: bool,
+    /// Options ▸ Experimental features.
+    pub experimental: Experimental,
+}
+
+/// Features being tried out: off until turned on in Options.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Experimental {
+    /// View ▸ System Diagram.
+    pub system_diagram: bool,
 }
 
 impl Default for Prefs {
@@ -32,6 +46,8 @@ impl Default for Prefs {
             accent: Default::default(),
             autorecover_minutes: 5,
             recent_actions: vec![],
+            autosave: cfg!(target_arch = "wasm32"),
+            experimental: Experimental::default(),
         }
     }
 }
@@ -133,7 +149,7 @@ mod tests {
         let a = Prefs { text_size: 20.0, ui_zoom: 1.5, ..Default::default() };
         a.save(&oldest).unwrap();
         assert_eq!(load_with_migration(&new), a, "0.1–0.2 prefs are picked up");
-        let b = Prefs { text_size: 18.0, ui_zoom: 1.0, theme_mode: ThemeMode::Dark, accent: Accent::Green, autorecover_minutes: 5, recent_actions: vec!["link".into()] };
+        let b = Prefs { text_size: 18.0, ui_zoom: 1.0, theme_mode: ThemeMode::Dark, accent: Accent::Green, autorecover_minutes: 5, recent_actions: vec!["link".into()], autosave: true, experimental: Experimental { system_diagram: true } };
         b.save(&older).unwrap();
         assert_eq!(load_with_migration(&new), b, "0.3 prefs win over 0.1–0.2");
         let c = Prefs { text_size: 16.0, ..Default::default() };

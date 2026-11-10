@@ -938,6 +938,8 @@ impl Ui {
         sandbox_env();
         let mut app = ProjectFcgApp::new(p);
         app.use_portal = false;
+        // the experimental views get the same treatment
+        app.prefs.experimental.system_diagram = true;
         let mut u = Ui { ctx: egui::Context::default(), app, t: 0.0 };
         u.frame(vec![]);
         u
@@ -1006,7 +1008,7 @@ fn random_command(r: &mut Rng, app: &ProjectFcgApp) -> Command {
             2 => SetGanttView(*r.pick(&[GanttViewKind::Gantt, GanttViewKind::Tracking, GanttViewKind::Detail, GanttViewKind::Leveling])),
             _ => SetEstimate(*r.pick(&projectfcg::board::Estimate::ALL)),
         },
-        13 => ShowView(*r.pick(&[MainView::Gantt, MainView::TaskUsage, MainView::ResourceSheet, MainView::ResourceUsage, MainView::Board, MainView::NetworkDiagram, MainView::Calendar, MainView::Risks, MainView::EarnedValue])),
+        13 => ShowView(*r.pick(&[MainView::Gantt, MainView::TaskUsage, MainView::ResourceSheet, MainView::ResourceUsage, MainView::Board, MainView::NetworkDiagram, MainView::Calendar, MainView::Risks, MainView::EarnedValue, MainView::System])),
         14 => AddResource(*r.pick(&[ResourceType::Work, ResourceType::Material, ResourceType::Cost])),
         15 => SetTable(*r.pick(&[Table::Entry, Table::Schedule, Table::Tracking, Table::Cost, Table::Work, Table::EarnedValue, Table::EarnedValueCost, Table::EarnedValueSchedule, Table::Variance])),
         16 => SetShownBaseline(r.below(13) as u8),
@@ -1628,7 +1630,7 @@ fn exercise_file(kind: Kind, text: &str, frames: bool, f: &mut Findings, ctx: &s
         let r = guarded(|| {
             let mut u = Ui::new(p);
             let ctx = u.ctx.clone();
-            for v in [MainView::Gantt, MainView::TaskUsage, MainView::ResourceUsage, MainView::Board, MainView::ResourceSheet, MainView::NetworkDiagram, MainView::Calendar, MainView::Risks, MainView::EarnedValue] {
+            for v in [MainView::Gantt, MainView::TaskUsage, MainView::ResourceUsage, MainView::Board, MainView::ResourceSheet, MainView::NetworkDiagram, MainView::Calendar, MainView::Risks, MainView::EarnedValue, MainView::System] {
                 u.app.execute(Command::ShowView(v), &ctx);
                 u.frame(vec![]);
             }

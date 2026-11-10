@@ -27,6 +27,7 @@ use wasm_bindgen_futures::JsFuture;
 extern "C" {
     fn pfcg_can_save_in_place() -> bool;
     fn pfcg_has_handle() -> bool;
+    fn pfcg_can_write_quietly() -> bool;
     fn pfcg_forget_handle();
     fn pfcg_set_title(t: &str);
     fn pfcg_set_dirty(d: bool);
@@ -65,6 +66,9 @@ enum Done {
     Dropped(String, Vec<u8>),
     Cancelled,
     Failed(String),
+    /// AutoSave wrote the file (at generation `gen`), or couldn't.
+    AutoSaved { name: String, gen: u64 },
+    AutoFailed(String),
 }
 
 thread_local! {
@@ -171,6 +175,28 @@ impl ProjectFcgApp {
                     None => Done::NeedsName,
                 },
                 Err(e) => Done::Failed(format!("Couldn't save: {}", js_error(e))),
+            };
+            finish(&ctx, d);
+        });
+    }
+
+    /// AutoSave: write to the open file in the background, with no dialog.
+    pub(super) fn web_autosave(&mut self) {
+        let Some(ctx) = self.web_ctx() else { return };
+        if self.web.busy || !pfcg_can_write_quietly() {
+            return;
+        }
+        let Some(bytes) = self.project_bytes() else { return };
+        self.web.busy = true;
+        let gen = self.history.generation();
+        let p = pfcg_save(&bytes);
+        wasm_bindgen_futures::spawn_local(async move {
+            let d = match JsFuture::from(p).await {
+                Ok(v) => match v.as_string() {
+                    Some(name) => Done::AutoSaved { name, gen },
+                    None => Done::AutoFailed("the file is no longer open".into()),
+                },
+                Err(e) => Done::AutoFailed(js_error(e)),
             };
             finish(&ctx, d);
         });
@@ -325,7 +351,11 @@ impl ProjectFcgApp {
                         pfcg_store_remove(RECOVER_KEY);
                         self.web.recovered_gen = None;
                     }
-                    self.set_status(if can_reopen { format!("Saved {name}") } else { format!("Downloaded {name}") });
+                    self.set_status(if can_reopen {
+                        format!("Saved {name}")
+                    } else {
+                        format!("Downloaded {name}. This browser can't save into files (Chrome and Edge can), so each Save downloads a copy.")
+                    });
                     if let Some(a) = self.web.after_save.take() {
                         if !self.dirty {
                             self.deferred_action = Some(a);
@@ -343,6 +373,20 @@ impl ProjectFcgApp {
                 Done::Cancelled => {
                     self.web.busy = false;
                     self.web.after_save = None;
+                }
+                Done::AutoSaved { name, gen } => {
+                    self.web.busy = false;
+                    self.dirty = self.history.generation() != gen;
+                    if !self.dirty {
+                        pfcg_store_remove(RECOVER_KEY);
+                        self.web.recovered_gen = None;
+                    }
+                    self.set_status(format!("AutoSaved {name} at {}", chrono::Local::now().format("%-I:%M %p")));
+                }
+                Done::AutoFailed(e) => {
+                    self.web.busy = false;
+                    self.autosave.paused = true;
+                    self.set_status(format!("AutoSave paused: couldn't write the file ({e}). Save (Ctrl+S) to try again."));
                 }
                 Done::Failed(e) => {
                     self.web.busy = false;
@@ -443,6 +487,13 @@ pub fn save_prefs(p: &super::prefs::Prefs) {
 /// Is saving back to the same file possible here (Chrome, Edge)?
 pub fn can_save_in_place() -> bool {
     pfcg_can_save_in_place()
+}
+
+/// Can the open file be written without asking (it has been saved to, or
+/// picked in Save As, since the page opened)? Browsers only ask for
+/// permission in answer to a click, so AutoSave waits for the first Save.
+pub fn can_write_quietly() -> bool {
+    pfcg_can_write_quietly()
 }
 
 /// Start the app on the page's canvas.

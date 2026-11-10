@@ -2,6 +2,27 @@
 
 What each version added, newest first, with the bugs that reviews and fuzzing found along the way. The [README](../README.md) describes the app as it is now.
 
+## 0.14: System diagram (experimental) and AutoSave
+
+- **System Diagram** (experimental: turn it on in File ▸ Options ▸ Experimental features; `src/system.rs`, `src/app/system_view.rs`):
+  - A freeform map of what the project is building: systems, subsystems, components, software, external systems, functions, groups and notes. Elements nest by being dropped inside one another.
+  - Interfaces between elements, by kind and direction.
+  - Tasks, tickets and risks are tied to elements and interfaces. Their progress, lateness and risk ratings roll up through the parts. A new System Elements column shows each task's parts.
+  - Technical performance measures (current, target, threshold) on each element.
+  - Health (on track, watch, trouble) from late tasks, the worst risk and the worst measure. Colour by kind, health or state.
+  - The sample plan has a small diagram.
+- **AutoSave** (File tab, and Options): saves a plan that has a file a few seconds after each change.
+  - On by default in the browser, where in Chrome and Edge it writes into the file in the background. Off by default on the desktop.
+  - A failed background save pauses AutoSave until the next Save instead of repeating an error.
+- **Web:** a Save that downloads (Firefox, Safari) now says why, and that Chrome or Edge save into the file.
+- **Tests:** `tests/system.rs` (10 tests) covers:
+  - elements, nesting, measures and roll-ups, including the sample's;
+  - damaged files and older files;
+  - the view with the mouse and keyboard: add, name, drag into a system, connect with the handle, Delete and Undo;
+  - the panel's edits as single undo steps;
+  - the Options switch;
+  - AutoSave saving, off, and pausing on a failure.
+
 ## 0.13: Earned value, Project's way, in PMI or DoD terms
 
 Earned value has been calculated since 0.6. 0.13 brings the rest of Project's earned value features, plus what DoD EVMS reports need (`src/earned_value.rs`, `src/app/ev_view.rs`).

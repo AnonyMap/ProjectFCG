@@ -25,6 +25,7 @@ pub mod resource_dialogs;
 pub mod resource_sheet;
 pub mod risk_view;
 pub mod ev_view;
+pub mod system_view;
 pub mod tell_me;
 pub mod item_search;
 pub mod safety;
@@ -194,6 +195,8 @@ pub enum MainView {
     Calendar,
     Risks,
     EarnedValue,
+    /// Experimental: File ▸ Options ▸ Experimental.
+    System,
 }
 
 impl MainView {
@@ -208,6 +211,7 @@ impl MainView {
             MainView::Calendar => "Calendar",
             MainView::Risks => "Risk Register",
             MainView::EarnedValue => "Earned Value",
+            MainView::System => "System Diagram",
         }
     }
 }
@@ -322,12 +326,14 @@ pub struct ProjectFcgApp {
     pub prefs_path: Option<PathBuf>,
     /// Crash safety: caught panics, AutoRecover, crash reports.
     pub safety: safety::Safety,
+    pub autosave: AutoSaveState,
     /// Leveling running in the background (large plans).
     pub leveling_job: Option<jobs::LevelJob>,
     pub network: network::NetworkState,
     pub calendar: calendar_view::CalendarState,
     pub risk_view: risk_view::RiskViewState,
     pub ev_view: ev_view::EvViewState,
+    pub system_view: system_view::SystemViewState,
     /// Search (Alt+Q).
     pub tell_me: tell_me::TellMe,
     /// Search the plan (Ctrl+E).
@@ -413,11 +419,13 @@ impl ProjectFcgApp {
             prefs: prefs::Prefs::default(),
             prefs_path: None,
             safety: Default::default(),
+            autosave: Default::default(),
             leveling_job: None,
             network: Default::default(),
             calendar: Default::default(),
             risk_view: Default::default(),
             ev_view: Default::default(),
+            system_view: Default::default(),
             tell_me: Default::default(),
             item_search: Default::default(),
             #[cfg(target_arch = "wasm32")]
@@ -1075,6 +1083,20 @@ impl ProjectFcgApp {
                 _ => {}
             }
         }
+        // In the System Diagram, edits in the panel are saved before any
+        // command, and Delete/Insert act on the diagram.
+        if self.view.main == MainView::System {
+            self.commit_system_draft();
+            match cmd {
+                DeleteTasks | DeleteKey => return self.delete_system_selection(),
+                InsertTask => {
+                    self.add_system_element_in_view();
+                    return;
+                }
+                Copy | Cut | Paste | Indent | Outdent | MoveUp | MoveDown | LinkTasks | UnlinkTasks | FillDown | ResetField | InsertSummary | InsertMilestone | InsertRecurring | EditCell | TaskInfo | Find | FindNext => return,
+                _ => {}
+            }
+        }
         if cmd == DeleteKey {
             let on_name = self.columns.get(self.active_col).is_some_and(|c| c.id == ColumnId::Name);
             let sheet = self.view.main == MainView::Gantt || self.view.main == MainView::TaskUsage;
@@ -1104,6 +1126,7 @@ impl ProjectFcgApp {
             NewFromAgileSample => self.guarded(PendingAction::NewAgileSample, ctx),
             Open => self.guarded(PendingAction::Open, ctx),
             Save => {
+                self.autosave.paused = false;
                 if let Some(p) = self.path.clone() {
                     self.save_to(p);
                 } else {
@@ -1122,6 +1145,8 @@ impl ProjectFcgApp {
                 self.dialogs.open_options(&self.project);
                 if let Some(o) = &mut self.dialogs.options {
                     o.autorecover = self.prefs.autorecover_minutes;
+                    o.autosave = self.prefs.autosave;
+                    o.system_diagram = self.prefs.experimental.system_diagram;
                 }
             }
             Quit => self.guarded(PendingAction::Quit, ctx),
@@ -1690,9 +1715,20 @@ impl ProjectFcgApp {
                 let m = if self.is_dark(ctx) { theme::ThemeMode::Light } else { theme::ThemeMode::Dark };
                 self.set_theme_mode(m);
             }
+            ToggleAutoSave => {
+                self.prefs.autosave = !self.prefs.autosave;
+                self.save_prefs();
+                let msg = self.autosave_status();
+                self.set_status(msg);
+            }
             ShowView(v) => {
+                if v == MainView::System && !self.prefs.experimental.system_diagram {
+                    self.set_status("The System Diagram is experimental: turn it on in File ▸ Options ▸ Experimental features.");
+                    return;
+                }
                 self.commit_edit();
                 self.commit_risk_draft();
+                self.commit_system_draft();
                 self.res_commit_edit();
                 self.view.main = v;
                 if v == MainView::ResourceSheet && self.sheet.active.is_none() {
@@ -2170,6 +2206,7 @@ impl ProjectFcgApp {
             self.run_pending(a, &ctx);
         }
         self.poll_jobs(&ctx);
+        self.autosave_tick(&ctx);
         // Window close: ask to save.
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.dirty {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -2281,7 +2318,12 @@ impl ProjectFcgApp {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             let col = if self.status_error { theme::pal().warn } else { theme::pal().text };
-            ui.label(egui::RichText::new(&self.status).color(col).size(12.0));
+            // a long message is cut short (the whole of it on hover) rather
+            // than running over the rest of the bar
+            let w = (ui.available_width() - 760.0).max(220.0);
+            ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(egui::RichText::new(&self.status).color(col).size(12.0)).truncate());
+            });
             ui.separator();
             let mode = if self.project.settings.new_tasks_auto {
                 "New Tasks : Auto Scheduled"
@@ -2379,6 +2421,7 @@ impl ProjectFcgApp {
             MainView::Calendar => return calendar_view::show(self, ui, full),
             MainView::Risks => return risk_view::show(self, ui, full),
             MainView::EarnedValue => return ev_view::show(self, ui, full),
+            MainView::System => return system_view::show(self, ui, full),
             MainView::Gantt => {}
         }
         let min_table = 120.0;
@@ -2499,7 +2542,7 @@ impl ProjectFcgApp {
                             }
                         }
                         MainView::Board => board::key(self, *key, *modifiers),
-                        MainView::Gantt | MainView::NetworkDiagram | MainView::Calendar | MainView::Risks | MainView::EarnedValue => {}
+                        MainView::Gantt | MainView::NetworkDiagram | MainView::Calendar | MainView::Risks | MainView::EarnedValue | MainView::System => {}
                     }
                 }
                 egui::Event::Text(t) => {
@@ -2786,6 +2829,8 @@ pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
                 app.prefs.accent = loaded.accent;
                 app.prefs.autorecover_minutes = loaded.autorecover_minutes;
                 app.prefs.recent_actions = loaded.recent_actions;
+                app.prefs.autosave = loaded.autosave;
+                app.prefs.experimental = loaded.experimental;
                 app.set_text_size(size);
                 app.prefs_path = Some(path);
             }
@@ -2814,3 +2859,107 @@ pub fn baseline_name(n: usize) -> String {
         format!("Baseline {n}")
     }
 }
+
+/// How long AutoSave waits after the last change.
+pub const AUTOSAVE_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// AutoSave's progress: the change it is waiting to save.
+pub struct AutoSaveState {
+    gen: Option<u64>,
+    since: Option<web_time::Instant>,
+    /// A save failed: wait for the next Save before trying again.
+    pub paused: bool,
+    /// How long after the last change it saves.
+    pub delay: std::time::Duration,
+}
+
+impl Default for AutoSaveState {
+    fn default() -> Self {
+        AutoSaveState { gen: None, since: None, paused: false, delay: AUTOSAVE_DELAY }
+    }
+}
+
+/// What AutoSave does here (its tooltip).
+pub fn autosave_help() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if web::can_save_in_place() {
+            "Save into the plan's file a few seconds after each change, in the background. A new plan needs one Save first, to pick the file (and the browser asks once for permission to change a file you opened).".into()
+        } else {
+            "This browser can't write into files (Firefox and Safari can't; Chrome and Edge can), so Save downloads a copy and AutoSave can't keep a file up to date. AutoRecover still keeps unsaved work in the browser.".into()
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        "Save to the plan's file a few seconds after each change. A new plan needs one Save first, to pick the file.".into()
+    }
+}
+
+impl ProjectFcgApp {
+    /// A sentence on what AutoSave is doing for this plan.
+    pub fn autosave_status(&self) -> String {
+        if !self.prefs.autosave {
+            return "AutoSave is off: Save (Ctrl+S) saves.".into();
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            if !web::can_save_in_place() {
+                return "AutoSave is on, but this browser can't write into files: Save downloads a copy. Use Chrome or Edge to save into the file.".into();
+            }
+            if !web::can_write_quietly() {
+                return "AutoSave is on: it starts after the next Save (the browser asks once which file, or for permission to change it).".into();
+            }
+        }
+        match &self.path {
+            Some(p) => format!("AutoSave is on: changes are saved to {} as you work.", p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()),
+            None => "AutoSave is on: it starts once the plan has been saved to a file.".into(),
+        }
+    }
+
+    /// Every frame: save a few seconds after the last change, when the plan
+    /// has a file to save to.
+    fn autosave_tick(&mut self, ctx: &egui::Context) {
+        if !self.prefs.autosave || !self.dirty || self.autosave.paused || self.path.is_none() {
+            self.autosave.since = None;
+            self.autosave.gen = None;
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        if !web::can_write_quietly() {
+            return;
+        }
+        let gen = self.history.generation();
+        if self.autosave.gen != Some(gen) {
+            self.autosave.gen = Some(gen);
+            self.autosave.since = Some(web_time::Instant::now());
+        }
+        let Some(since) = self.autosave.since else { return };
+        let waited = since.elapsed();
+        if waited < self.autosave.delay {
+            ctx.request_repaint_after(self.autosave.delay - waited);
+            return;
+        }
+        // not in the middle of typing a value or answering a dialog
+        if self.edit.is_some() || self.sheet.edit.is_some() || self.dialogs.any_modal_open() || self.file_browser.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            return;
+        }
+        self.autosave.since = None;
+        #[cfg(target_arch = "wasm32")]
+        self.web_autosave();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = self.path.clone() {
+            match crate::io::save(&self.project, &path) {
+                Ok(()) => {
+                    self.dirty = false;
+                    self.set_status(format!("AutoSaved {} at {}", path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default(), chrono::Local::now().format("%-I:%M %p")));
+                }
+                Err(e) => {
+                    self.autosave.paused = true;
+                    self.set_status(format!("AutoSave paused: {e}. Save (Ctrl+S) to try again."));
+                }
+            }
+        }
+    }
+}
+
