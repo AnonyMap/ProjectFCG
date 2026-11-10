@@ -1157,7 +1157,7 @@ fn measures_ui(ui: &mut egui::Ui, ms: &mut Vec<Measure>) {
                 let (dot, resp) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 5.0, measure_color(m.status()));
                 resp.on_hover_text(m.status().label());
-                ui.add(egui::TextEdit::singleline(&mut m.name).hint_text("Name").desired_width(104.0));
+                ui.add_sized([104.0, 20.0], egui::TextEdit::singleline(&mut m.name).hint_text("Name"));
                 for v in [&mut m.current, &mut m.target, &mut m.threshold] {
                     num_field(ui, v);
                 }
@@ -1188,7 +1188,7 @@ fn measures_ui(ui: &mut egui::Ui, ms: &mut Vec<Measure>) {
 fn num_field(ui: &mut egui::Ui, v: &mut Option<f64>) {
     let id = ui.next_auto_id();
     let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| v.map(crate::duration::fmt_num).unwrap_or_default());
-    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(42.0));
+    let r = ui.add_sized([42.0, 20.0], egui::TextEdit::singleline(&mut text));
     if r.has_focus() {
         ui.data_mut(|d| d.insert_temp(id, text.clone()));
         let t = text.trim().replace(',', "");

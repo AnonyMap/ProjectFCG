@@ -354,7 +354,7 @@ impl ProjectFcgApp {
                     self.set_status(if can_reopen {
                         format!("Saved {name}")
                     } else {
-                        format!("Downloaded {name}: this browser can't write into files, so each Save downloads a copy. In Chrome or Edge, Save writes into the file and AutoSave keeps it saved.")
+                        format!("Downloaded {name}. This browser can't save into files (Chrome and Edge can), so each Save downloads a copy.")
                     });
                     if let Some(a) = self.web.after_save.take() {
                         if !self.dirty {

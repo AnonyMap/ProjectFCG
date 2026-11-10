@@ -665,7 +665,10 @@ impl Project {
             f.work.retain(ok);
             fixed += n - f.work.len();
         }
-        sys.next_id = sys.next_id.max(next + 1);
+        // (an empty diagram keeps its counter: a saved file reopens unchanged)
+        if next > 0 {
+            sys.next_id = sys.next_id.max(next + 1);
+        }
         fixed
     }
 }

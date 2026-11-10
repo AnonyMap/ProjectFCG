@@ -173,7 +173,7 @@ fn sample_system(p: &mut Project) {
         vec![],
     );
     let users = el(K::External, "Customers", S::Fielded, [40.0, 400.0], [200.0, 70.0], vec![], vec![]);
-    let pay = el(K::External, "Payment provider", S::Fielded, [800.0, 80.0], [190.0, 70.0], vec![], vec![]);
+    let pay = el(K::External, "Payment provider", S::Fielded, [295.0, -150.0], [190.0, 70.0], vec![], vec![]);
     let s = &mut p.system;
     let sys = s.add_element(Element { kind: K::System, name: "Release 2.0".into(), state: S::Build, pos: [0.0, 0.0], size: [760.0, 340.0], ..Default::default() });
     let _ = sys;

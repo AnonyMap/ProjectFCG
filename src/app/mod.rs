@@ -2318,7 +2318,12 @@ impl ProjectFcgApp {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             let col = if self.status_error { theme::pal().warn } else { theme::pal().text };
-            ui.label(egui::RichText::new(&self.status).color(col).size(12.0));
+            // a long message is cut short (the whole of it on hover) rather
+            // than running over the rest of the bar
+            let w = (ui.available_width() - 760.0).max(220.0);
+            ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(egui::RichText::new(&self.status).color(col).size(12.0)).truncate());
+            });
             ui.separator();
             let mode = if self.project.settings.new_tasks_auto {
                 "New Tasks : Auto Scheduled"
