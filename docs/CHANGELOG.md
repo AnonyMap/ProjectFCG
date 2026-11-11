@@ -2,6 +2,24 @@
 
 What each version added, newest first, with the bugs that reviews and fuzzing found along the way. The [README](../README.md) describes the app as it is now.
 
+## 0.15: Privacy enforced, views from anywhere, polish
+
+- **Privacy:**
+  - **Web:** the page forbids itself any network access with a Content Security Policy. Only its own scripts may run, and nothing can be fetched, posted or loaded from elsewhere.
+  - **CSV:** exports (tasks, risks, Jira) can't carry live spreadsheet formulas.
+  - **Proof:** `tests/security.rs` checks all of this and that no networking code or library is in the app, and a browser test tries every way out.
+- **Switching views:**
+  - **Status bar:** a button for each view.
+  - **Keys:** Ctrl+Shift+1…0 switch views from anywhere.
+  - **Board tab:** leaving it returns to the view you came from.
+  - **Zoom Out:** now Ctrl+Shift+- (Ctrl+Shift+8 is a view key).
+- **Fix: shortcuts while typing.** Ctrl+S, Ctrl+O, Ctrl+P and F12 did nothing while a cell or field was being edited. They now keep the value and act.
+- **Search the plan:** the box is optional, off by default. Ctrl+E opens it anyway, Ctrl+F is Find, and Options shows it in the title bar.
+- **Performance:** the Earned Value view's period report draws only the rows in sight. On a 10,000-task plan an idle frame took 36 ms and now takes under 1 ms, and opening the view went from 148 ms to 32 ms. `examples/profile.rs views N` times every view.
+- **Tests:**
+  - **New in `tests/ui.rs`:** view keys, a typed value kept on Save or a view switch, the Board tab, and the optional box.
+  - **New `tests/security.rs` (4 tests):** CSV formulas, XML entities, and the no-network guard.
+
 ## 0.14: System diagram (experimental) and AutoSave
 
 - **System Diagram** (experimental: turn it on in File ▸ Options ▸ Experimental features; `src/system.rs`, `src/app/system_view.rs`):
