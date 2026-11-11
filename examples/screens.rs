@@ -261,6 +261,7 @@ fn search(app: &mut ProjectFcgApp, ctx: &egui::Context) {
 /// Search the plan (Ctrl+E): "lena" finds the person, her tasks and
 /// the risks that mention her.
 fn item_search(app: &mut ProjectFcgApp, ctx: &egui::Context) {
+    app.prefs.show_item_search = true;
     app.focus_item_search(ctx, Some("lena".into()));
 }
 

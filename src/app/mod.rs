@@ -1734,6 +1734,8 @@ impl ProjectFcgApp {
                 self.commit_edit();
                 self.commit_risk_draft();
                 self.commit_system_draft();
+                // (the Board tab sets it again when it was the way in)
+                self.view_before_board = None;
                 self.res_commit_edit();
                 self.view.main = v;
                 if v == MainView::ResourceSheet && self.sheet.active.is_none() {
@@ -3062,6 +3064,26 @@ impl ProjectFcgApp {
             }
         });
         self.execute(cmd, ctx);
+    }
+}
+
+impl ProjectFcgApp {
+    /// A ribbon tab clicked. The Board tab is a workspace: it shows the
+    /// board, and leaving it for a tab of task commands (Task, Resource,
+    /// Project, Format) goes back to the view it came from.
+    pub fn select_tab(&mut self, tab: RibbonTab, ctx: &egui::Context) {
+        self.tab = tab;
+        if tab == RibbonTab::Board && self.view.main != MainView::Board {
+            let before = self.view.main;
+            self.execute(Command::ShowView(MainView::Board), ctx);
+            if self.view.main == MainView::Board {
+                self.view_before_board = Some(before);
+            }
+        } else if matches!(tab, RibbonTab::Task | RibbonTab::Resource | RibbonTab::Project | RibbonTab::Format) && self.view.main == MainView::Board {
+            if let Some(v) = self.view_before_board.take() {
+                self.execute(Command::ShowView(v), ctx);
+            }
+        }
     }
 }
 

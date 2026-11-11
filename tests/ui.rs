@@ -2049,3 +2049,113 @@ fn delete_after_clicking_a_bar_deletes_the_task() {
     h.key(Key::Delete, NONE);
     assert_eq!(h.names(), ["Design", "Test"]);
 }
+
+// ------------------------------------------------------- switching views
+
+/// Ctrl+Shift+digit, by the key or (Shift+1 arriving as "!") by its place.
+fn view_key(h: &mut H, digit: Key) {
+    h.key(digit, ctrl_shift());
+}
+
+#[test]
+fn views_switch_with_keys_from_anywhere() {
+    let mut h = three_tasks();
+    view_key(&mut h, Key::Num2);
+    assert_eq!(h.app.view.main, projectfcg::app::MainView::Board);
+    view_key(&mut h, Key::Num8);
+    assert_eq!(h.app.view.main, projectfcg::app::MainView::Risks);
+    view_key(&mut h, Key::Num9);
+    assert_eq!(h.app.view.main, projectfcg::app::MainView::EarnedValue);
+    // "!" with the 1 key's place
+    h.frame(vec![Event::Key { key: Key::Exclamationmark, physical_key: Some(Key::Num1), pressed: true, repeat: false, modifiers: ctrl_shift() }]);
+    h.frame(vec![]);
+    assert_eq!(h.app.view.main, projectfcg::app::MainView::Gantt);
+    // the experimental view only when it's on
+    view_key(&mut h, Key::Num0);
+    assert_eq!(h.app.view.main, projectfcg::app::MainView::Gantt);
+    assert!(h.app.status.contains("Experimental"), "{}", h.app.status);
+    h.app.prefs.experimental.system_diagram = true;
+    view_key(&mut h, Key::Num0);
+    assert_eq!(h.app.view.main, projectfcg::app::MainView::System);
+    // every label says its key
+    assert_eq!(projectfcg::app::view_key_label(projectfcg::app::MainView::Board).as_deref(), Some("Ctrl+Shift+2"));
+    assert_eq!(projectfcg::app::view_key_label(projectfcg::app::MainView::System).as_deref(), Some("Ctrl+Shift+0"));
+}
+
+#[test]
+fn a_value_being_typed_is_kept_when_switching_or_saving() {
+    let mut h = three_tasks();
+    h.key(Key::ArrowUp, ctrl());
+    h.key(Key::ArrowRight, NONE);
+    // typing "4d" into Design's Duration, then straight to the board
+    h.text("4");
+    h.text("d");
+    assert!(h.app.edit.is_some(), "editing");
+    view_key(&mut h, Key::Num2);
+    assert_eq!(h.app.view.main, projectfcg::app::MainView::Board);
+    assert_eq!(h.app.project.tasks[0].duration.minutes, 4 * 480, "the value was kept");
+    view_key(&mut h, Key::Num1);
+    // Ctrl+S while typing saves, with the value
+    let dir = std::env::temp_dir().join(format!("projectfcg-ctrl-s-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("plan.pfcg");
+    h.app.path = Some(path.clone());
+    h.key(Key::ArrowDown, NONE);
+    h.text("7");
+    h.text("d");
+    h.key(Key::S, ctrl());
+    assert!(h.app.edit.is_none() && !h.app.dirty, "{}", h.app.status);
+    assert_eq!(projectfcg::io::load(&path).unwrap().tasks[1].duration.minutes, 7 * 480);
+    // an invalid value isn't saved, and nothing else happens
+    h.key(Key::ArrowDown, NONE);
+    h.text("x");
+    h.text("yz");
+    let before = std::fs::read(&path).unwrap();
+    h.key(Key::S, ctrl());
+    assert_eq!(std::fs::read(&path).unwrap(), before, "not saved");
+    view_key(&mut h, Key::Num2);
+    assert_eq!(h.app.view.main, projectfcg::app::MainView::Gantt, "stayed, to fix the value");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn leaving_the_board_tab_goes_back() {
+    use projectfcg::app::{MainView, RibbonTab};
+    let mut h = three_tasks();
+    let ctx = h.ctx.clone();
+    h.app.select_tab(RibbonTab::Board, &ctx);
+    assert_eq!(h.app.view.main, MainView::Board);
+    // View and Help don't change the view; Task does: back to the Gantt
+    h.app.select_tab(RibbonTab::View, &ctx);
+    assert_eq!(h.app.view.main, MainView::Board);
+    h.app.select_tab(RibbonTab::Task, &ctx);
+    assert_eq!(h.app.view.main, MainView::Gantt);
+    // from the Calendar, back to the Calendar
+    h.app.execute(Command::ShowView(MainView::Calendar), &ctx);
+    h.app.select_tab(RibbonTab::Board, &ctx);
+    h.app.select_tab(RibbonTab::Project, &ctx);
+    assert_eq!(h.app.view.main, MainView::Calendar);
+    // the board reached another way stays put
+    h.app.execute(Command::ShowView(MainView::Board), &ctx);
+    h.app.select_tab(RibbonTab::Task, &ctx);
+    assert_eq!(h.app.view.main, MainView::Board);
+}
+
+#[test]
+fn the_search_box_is_optional_and_ctrl_e_still_works() {
+    let mut h = three_tasks();
+    assert!(!h.app.prefs.show_item_search, "hidden by default");
+    h.key(Key::E, ctrl());
+    assert!(h.ctx.memory(|m| m.has_focus(projectfcg::app::item_search::box_id())), "Ctrl+E opens it");
+    h.key(Key::Escape, NONE);
+    assert!(!h.app.item_search.open);
+    // Ctrl+F is still Find
+    h.key(Key::F, ctrl());
+    assert!(h.app.dialogs.find_open, "Find");
+    h.key(Key::Escape, NONE);
+    // shown, with Tell me beside it
+    h.app.prefs.show_item_search = true;
+    h.frame(vec![]);
+    h.key(Key::E, ctrl());
+    assert!(h.ctx.memory(|m| m.has_focus(projectfcg::app::item_search::box_id())));
+}

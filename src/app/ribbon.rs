@@ -63,20 +63,7 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         let col = if selected { th.heading } else { th.on_band };
         ui.painter().text(r.center(), Align2::CENTER_CENTER, name, FontId::proportional(13.5), col);
         if resp.clicked() {
-            app.tab = tab;
-            // the Board tab is a workspace: it shows the board, and leaving
-            // it for a tab of task commands goes back to where you were
-            if tab == RibbonTab::Board && app.view.main != super::MainView::Board {
-                let before = app.view.main;
-                app.execute(Command::ShowView(super::MainView::Board), &ctx);
-                if app.view.main == super::MainView::Board {
-                    app.view_before_board = Some(before);
-                }
-            } else if matches!(tab, RibbonTab::Task | RibbonTab::Resource | RibbonTab::Project | RibbonTab::Format) && app.view.main == super::MainView::Board {
-                if let Some(v) = app.view_before_board.take() {
-                    app.execute(Command::ShowView(v), &ctx);
-                }
-            }
+            app.select_tab(tab, &ctx);
         }
         x += w + 2.0;
     }
