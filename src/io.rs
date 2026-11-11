@@ -74,8 +74,34 @@ pub fn load(path: &Path) -> Result<Project, String> {
     from_json(&text)
 }
 
+/// A CSV cell that a spreadsheet will show as text, never run as a
+/// formula. Excel and others treat a cell starting with = + - @ (or a tab
+/// or carriage return) as a formula, and a formula can send the sheet's
+/// contents to a web address (WEBSERVICE, HYPERLINK, DDE): a task named
+/// `=WEBSERVICE("https://…"&A2)`, say from an imported file, would do that
+/// when the export is opened. Such a cell gets a leading apostrophe, as
+/// OWASP recommends; a plain number ("-5", "+3.5") is left as it is.
+pub fn csv_safe(s: &str) -> std::borrow::Cow<'_, str> {
+    let risky = s.starts_with(['=', '+', '-', '@', '\t', '\r']) && s.trim().parse::<f64>().is_err();
+    if risky {
+        std::borrow::Cow::Owned(format!("'{s}"))
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
+}
+
+/// Undo [`csv_safe`] when reading a CSV back: an apostrophe before a
+/// formula character is dropped.
+pub fn csv_unsafe(s: &str) -> &str {
+    match s.strip_prefix('\'') {
+        Some(rest) if rest.starts_with(['=', '+', '-', '@', '\t', '\r']) && rest.trim().parse::<f64>().is_err() => rest,
+        _ => s,
+    }
+}
+
 fn csv_escape(s: &str) -> String {
-    if s.contains([',', '"', '\n']) {
+    let s = csv_safe(s);
+    if s.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()

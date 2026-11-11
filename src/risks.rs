@@ -648,6 +648,8 @@ impl Project {
     /// The register as CSV (one row per risk), for a spreadsheet or report.
     pub fn risks_csv(&self) -> String {
         let q = |s: &str| {
+            // (never a live formula in a spreadsheet: see `io::csv_safe`)
+            let s = crate::io::csv_safe(s);
             if s.contains([',', '"', '\n', '\r']) {
                 format!("\"{}\"", s.replace('"', "\"\""))
             } else {

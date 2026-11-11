@@ -17,6 +17,17 @@ A page opened from disk counts as a secure context in Chrome and Edge, so their 
 
 The same file is also published as `index.html`, ready to host (GitHub Pages, say) if a link is ever wanted.
 
+## No network
+
+The page carries a Content Security Policy (`web/bundle.py` writes it) that forbids it any network access:
+
+- **Network:** no `fetch`, XHR, WebSocket or beacons.
+- **Loading:** no scripts, styles, images or fonts from anywhere else.
+- **Elsewhere:** no forms, frames or workers.
+- **What may run:** only the page's own three scripts, each allowed by its SHA-256 hash. They may compile the app's WebAssembly, and nothing else can run.
+
+The browser enforces the policy, so nothing typed into the app can leave the computer from the page. Files leave only through Save and Export, to wherever you choose.
+
 ## Files and saving
 
 - **In Chrome and Edge**, Open and Save As use the system file dialogs. Save writes back to the same file, and the first save to a file asks permission once. The browser writes to a temporary file and swaps it in when complete, so a failed save leaves the old file intact.

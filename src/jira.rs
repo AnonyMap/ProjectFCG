@@ -16,6 +16,16 @@ use std::collections::HashMap;
 
 /// RFC 4180 CSV: quoted fields, doubled quotes, newlines inside quotes,
 /// CRLF or LF, a leading BOM. Blank lines are skipped.
+/// A cell as written before [`crate::io::csv_safe`] protected it.
+fn unsafe_cell(s: String) -> String {
+    let t = crate::io::csv_unsafe(&s);
+    if t.len() == s.len() {
+        s
+    } else {
+        t.to_string()
+    }
+}
+
 pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     // Excel in some locales writes ';'-separated files: sniff the header.
@@ -42,10 +52,10 @@ pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
         }
         match c {
             '"' if field.is_empty() => quoted = true,
-            c if c == sep => row.push(std::mem::take(&mut field)),
+            c if c == sep => row.push(unsafe_cell(std::mem::take(&mut field))),
             '\r' => {}
             '\n' => {
-                row.push(std::mem::take(&mut field));
+                row.push(unsafe_cell(std::mem::take(&mut field)));
                 if !(row.len() == 1 && row[0].is_empty()) {
                     rows.push(std::mem::take(&mut row));
                 } else {
@@ -56,13 +66,15 @@ pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
         }
     }
     if !field.is_empty() || !row.is_empty() {
-        row.push(field);
+        row.push(unsafe_cell(field));
         rows.push(row);
     }
     rows
 }
 
 fn esc(s: &str) -> String {
+    // (never a live formula in a spreadsheet: see `io::csv_safe`)
+    let s = crate::io::csv_safe(s);
     if s.contains([',', '"', '\n', '\r']) || s.starts_with(' ') || s.ends_with(' ') {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {

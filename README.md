@@ -98,7 +98,7 @@ Its two additions to Project are:
 
 ### Search
 
-The title bar has two search boxes, as Outlook does: one for what's in the plan, one for commands.
+The title bar has **Tell me** for commands. **Search the plan** (Ctrl+E) opens beside it when you press Ctrl+E, and can stay in the title bar if you turn that on in Options. **Ctrl+F** is Find, as in Project.
 
 **Search the plan (Ctrl+E)** finds tasks, tickets, people and risks by name, ID, ticket key or anything written in them:
 
@@ -123,6 +123,14 @@ The title bar has two search boxes, as Outlook does: one for what's in the plan,
 ![Tell me: "add dependency" finds Link Tasks, with its ribbon location and shortcut](docs/search.png)
 
 ### Views
+
+**Switching views:** the status bar has a button for each view, and **Ctrl+Shift+1** to **0** switch from anywhere, even mid-typing:
+
+| Ctrl+Shift+ | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| View | Gantt | Board | Calendar | Network | Task Usage | Resource Sheet | Resource Usage | Risk Register | Earned Value | System Diagram |
+
+The Board tab is a workspace: it opens the board, and going back to the Task, Resource, Project or Format tab returns to the view you were on.
 
 - **Gantt Chart, Tracking Gantt, Detail Gantt and Leveling Gantt**, with a Timeline above them.
 - **Network Diagram** and **Calendar**.
@@ -201,7 +209,17 @@ Cost and schedule say whether the work is on time and on budget, not whether the
 - **Print or PDF:** the view as it is, on as many pages as it needs.
 - **Copy Picture** of the view, and **CSV** export of the tasks or the risk register.
 - **AutoSave** (File tab) saves a plan that has a file a few seconds after each change. It's on by default in the browser and off on the desktop.
-- **Reliability:** AutoRecover, saves that can't leave a half-written file, and recovery from internal errors without closing the window.
+- **Reliability:** AutoRecover, saves that can't leave a half-written file, and recovery from internal errors without closing the window. Ctrl+S, Ctrl+O, Ctrl+P and F12 work even while you're typing in a cell, and keep what you typed.
+
+### Privacy: your plan stays on your computer
+
+ProjectFCG never sends anything over the network. It has no accounts, no telemetry, no update checks and no cloud. Files go only where you save them: your disk, a USB stick, a NAS or a shared drive.
+
+- **Desktop app:** it contains no networking code and links no networking library. A test fails the build if either is ever added.
+- **Web version:** the page carries a Content Security Policy that forbids it any network access. A script inside it can't send anything anywhere, by `fetch`, form, image or WebSocket, and can't load anything from elsewhere. The browser enforces this, and the tests try each route and check it's refused.
+- **Where copies are kept:** AutoRecover keeps unsaved work in your own user folder on the desktop (on Linux, `~/.local/state/projectfcg`), or in the browser's own storage on this computer for the web version. Saving removes the copy.
+- **CSV exports are safe to open in Excel.** A name that starts with `=`, `+`, `-` or `@` gets a leading apostrophe. Otherwise a spreadsheet would run it as a formula, and a formula can send the sheet to a website. ProjectFCG removes the apostrophe again when it reads its own Jira CSV back.
+- **Imported files can't reach out either:** Project XML entities that point to other files aren't read, and an "entity bomb" is refused.
 
 | | |
 |---|---|
@@ -278,7 +296,7 @@ Undo (Ctrl+Z) covers every edit. **F1** lists all keyboard shortcuts, which are 
 
 **Structure.** The scheduling engine (`src/*.rs`) is a library with no user interface: calendars, the critical-path scheduler, resources and leveling, tracking, the board, risks, and file formats. The desktop app (`src/app/`) sits on top of it. That separation is what lets the tests drive the engine directly and the real interface without a window.
 
-**How correctness is checked.** 453 automated tests run on every release:
+**How correctness is checked.** 461 automated tests run on every release:
 
 - **Hand-derived expectations:** scheduling tests whose dates were worked out by hand from Project's rules.
 - **Reference implementations:** the fast calendar arithmetic and the fast leveler are compared with slow, obviously-correct versions on thousands of random cases.

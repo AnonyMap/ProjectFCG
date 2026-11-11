@@ -334,6 +334,9 @@ pub struct ProjectFcgApp {
     pub risk_view: risk_view::RiskViewState,
     pub ev_view: ev_view::EvViewState,
     pub system_view: system_view::SystemViewState,
+    /// The view the Board tab switched away from (leaving the tab goes
+    /// back to it).
+    pub view_before_board: Option<MainView>,
     /// Search (Alt+Q).
     pub tell_me: tell_me::TellMe,
     /// Search the plan (Ctrl+E).
@@ -426,6 +429,7 @@ impl ProjectFcgApp {
             risk_view: Default::default(),
             ev_view: Default::default(),
             system_view: Default::default(),
+            view_before_board: None,
             tell_me: Default::default(),
             item_search: Default::default(),
             #[cfg(target_arch = "wasm32")]
@@ -1147,6 +1151,7 @@ impl ProjectFcgApp {
                     o.autorecover = self.prefs.autorecover_minutes;
                     o.autosave = self.prefs.autosave;
                     o.system_diagram = self.prefs.experimental.system_diagram;
+                    o.show_item_search = self.prefs.show_item_search;
                 }
             }
             Quit => self.guarded(PendingAction::Quit, ctx),
@@ -1729,6 +1734,8 @@ impl ProjectFcgApp {
                 self.commit_edit();
                 self.commit_risk_draft();
                 self.commit_system_draft();
+                // (the Board tab sets it again when it was the way in)
+                self.view_before_board = None;
                 self.res_commit_edit();
                 self.view.main = v;
                 if v == MainView::ResourceSheet && self.sheet.active.is_none() {
@@ -2243,6 +2250,7 @@ impl ProjectFcgApp {
             ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Text(_))));
             self.focus_item_search(&ctx, None);
         }
+        self.global_keys(&ctx);
         self.handle_keyboard(&ctx);
         self.update_title(&ctx);
         // Copy Picture: the screenshot asked for last frame
@@ -2320,7 +2328,7 @@ impl ProjectFcgApp {
             let col = if self.status_error { theme::pal().warn } else { theme::pal().text };
             // a long message is cut short (the whole of it on hover) rather
             // than running over the rest of the bar
-            let w = (ui.available_width() - 760.0).max(220.0);
+            let w = (ui.available_width() - 1010.0).max(220.0);
             ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(egui::RichText::new(&self.status).color(col).size(12.0)).truncate());
             });
@@ -2404,6 +2412,19 @@ impl ProjectFcgApp {
                             .size(12.0)
                             .color(theme::pal().text_dim),
                     );
+                }
+                ui.separator();
+                // The views, one click (or Ctrl+Shift+digit) away from
+                // anywhere, as Project's status bar has them
+                for (v, glyph, name) in VIEW_KEYS.iter().rev() {
+                    if *v == MainView::System && !self.prefs.experimental.system_diagram {
+                        continue;
+                    }
+                    let on = self.view.main == *v;
+                    let tip = format!("{name} ({})", view_key_label(*v).unwrap_or_default());
+                    if ui.add(egui::Button::selectable(on, egui::RichText::new(*glyph).size(13.0))).on_hover_text(tip).clicked() && !on {
+                        self.execute(Command::ShowView(*v), &ctx2);
+                    }
                 }
             });
         });
@@ -2831,6 +2852,7 @@ pub fn run(open: Option<PathBuf>, sample: Option<bool>) -> eframe::Result<()> {
                 app.prefs.recent_actions = loaded.recent_actions;
                 app.prefs.autosave = loaded.autosave;
                 app.prefs.experimental = loaded.experimental;
+                app.prefs.show_item_search = loaded.show_item_search;
                 app.set_text_size(size);
                 app.prefs_path = Some(path);
             }
@@ -2958,6 +2980,108 @@ impl ProjectFcgApp {
                     self.autosave.paused = true;
                     self.set_status(format!("AutoSave paused: {e}. Save (Ctrl+S) to try again."));
                 }
+            }
+        }
+    }
+}
+
+/// The views with a shortcut (Ctrl+Shift+1…9, 0) and a button in the status
+/// bar, in the View tab's order: glyph, name.
+pub const VIEW_KEYS: [(MainView, &str, &str); 10] = [
+    (MainView::Gantt, "📊", "Gantt Chart"),
+    (MainView::Board, "📋", "Board"),
+    (MainView::Calendar, "📅", "Calendar"),
+    (MainView::NetworkDiagram, "🕸", "Network Diagram"),
+    (MainView::TaskUsage, "📆", "Task Usage"),
+    (MainView::ResourceSheet, "👥", "Resource Sheet"),
+    (MainView::ResourceUsage, "📈", "Resource Usage"),
+    (MainView::Risks, "⚠", "Risk Register"),
+    (MainView::EarnedValue, "💹", "Earned Value"),
+    (MainView::System, "🖧", "System Diagram"),
+];
+
+/// A view's shortcut, for tooltips ("Ctrl+Shift+2").
+pub fn view_key_label(v: MainView) -> Option<String> {
+    let k = VIEW_KEYS.iter().position(|x| x.0 == v)?;
+    Some(format!("Ctrl+Shift+{}", (k + 1) % 10))
+}
+
+impl ProjectFcgApp {
+    /// Keys that work whatever has the keyboard, even a cell being typed in
+    /// or a field in a panel: Save, Save As, Open, Print, and switching
+    /// views. A value being typed is kept first (as Excel does); if it
+    /// can't be (an invalid date, say), nothing else happens.
+    fn global_keys(&mut self, ctx: &egui::Context) {
+        if self.dialogs.any_modal_open() || self.file_browser.is_some() {
+            return;
+        }
+        use egui::Key;
+        let digit = |k: Key| -> Option<usize> {
+            [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9, Key::Num0].iter().position(|x| *x == k)
+        };
+        let found = ctx.input(|i| {
+            i.events.iter().enumerate().find_map(|(n, e)| {
+                let egui::Event::Key { key, physical_key, pressed: true, modifiers: m, .. } = e else { return None };
+                let cmd = if m.command && m.shift && !m.alt {
+                    // Shift+1 may arrive as "!": the key's place counts
+                    digit(*key).or(physical_key.and_then(digit)).map(|k| Command::ShowView(VIEW_KEYS[k].0))
+                } else if m.command && !m.shift && !m.alt {
+                    match key {
+                        Key::S => Some(Command::Save),
+                        Key::O => Some(Command::Open),
+                        Key::P => Some(Command::PrintDlg),
+                        _ => None,
+                    }
+                } else if m.is_none() && *key == Key::F12 {
+                    Some(Command::SaveAs)
+                } else {
+                    None
+                };
+                cmd.map(|c| (n, c))
+            })
+        });
+        let Some((n, cmd)) = found else { return };
+        // with nothing holding the keyboard, the usual key handling does it
+        // (the view keys are only here)
+        let busy = self.edit.is_some() || self.sheet.edit.is_some() || ctx.memory(|m| m.focused().is_some());
+        if !busy && !matches!(cmd, Command::ShowView(_)) {
+            return;
+        }
+        ctx.input_mut(|i| {
+            i.events.remove(n);
+        });
+        if !self.commit_edit() || !self.res_commit_edit() {
+            return;
+        }
+        if let Command::ShowView(v) = cmd {
+            if self.view.main == v {
+                return;
+            }
+        }
+        ctx.memory_mut(|m| {
+            if let Some(f) = m.focused() {
+                m.surrender_focus(f);
+            }
+        });
+        self.execute(cmd, ctx);
+    }
+}
+
+impl ProjectFcgApp {
+    /// A ribbon tab clicked. The Board tab is a workspace: it shows the
+    /// board, and leaving it for a tab of task commands (Task, Resource,
+    /// Project, Format) goes back to the view it came from.
+    pub fn select_tab(&mut self, tab: RibbonTab, ctx: &egui::Context) {
+        self.tab = tab;
+        if tab == RibbonTab::Board && self.view.main != MainView::Board {
+            let before = self.view.main;
+            self.execute(Command::ShowView(MainView::Board), ctx);
+            if self.view.main == MainView::Board {
+                self.view_before_board = Some(before);
+            }
+        } else if matches!(tab, RibbonTab::Task | RibbonTab::Resource | RibbonTab::Project | RibbonTab::Format) && self.view.main == MainView::Board {
+            if let Some(v) = self.view_before_board.take() {
+                self.execute(Command::ShowView(v), ctx);
             }
         }
     }

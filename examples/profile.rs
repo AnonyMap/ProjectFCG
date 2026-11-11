@@ -44,6 +44,60 @@ fn main() {
                 ctx.run_ui(raw, |ui| app.frame(ui)).drop_without_applying_deltas();
             }
         }
+        "views" => {
+            // every view: average frame time idle and while scrolling, on a
+            // baselined plan under way, with a large system diagram
+            projectfcg::schedule::schedule(&mut p);
+            p.set_baseline(None);
+            let n_tasks = p.tasks.len();
+            for i in (0..n_tasks).step_by(3) {
+                let _ = p.set_percent_complete(i, ((i * 37) % 100) as f64);
+            }
+            p.status_date = Some(p.start + chrono::Duration::days(60));
+            for k in 0..200u32 {
+                let kind = if k % 20 == 0 { projectfcg::system::ElementKind::Subsystem } else { projectfcg::system::ElementKind::Component };
+                let id = p.system.add_element(projectfcg::system::Element {
+                    kind,
+                    pos: [(k % 20) as f32 * 220.0, (k / 20) as f32 * 140.0],
+                    work: (0..10).map(|j| projectfcg::system::WorkLink::Task(p.tasks[((k as usize) * 10 + j) % n_tasks].uid)).collect(),
+                    ..Default::default()
+                });
+                if k > 0 {
+                    let _ = p.system.connect(id - 1, id, projectfcg::system::InterfaceKind::Data);
+                }
+            }
+            projectfcg::schedule::schedule(&mut p);
+            let mut app = projectfcg::app::ProjectFcgApp::new(p.clone());
+            app.use_portal = false;
+            app.prefs_path = None;
+            app.prefs.experimental.system_diagram = true;
+            let ctx = egui::Context::default();
+            let mut t = 0.0;
+            for (v, _, name) in projectfcg::app::VIEW_KEYS {
+                app.execute(projectfcg::app::commands::Command::ShowView(v), &ctx);
+                let mut frame = |app: &mut projectfcg::app::ProjectFcgApp, scroll: f32| {
+                    t += 0.05;
+                    let raw = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))),
+                        time: Some(t),
+                        events: if scroll != 0.0 {
+                            vec![egui::Event::PointerMoved(egui::pos2(700.0, 500.0)), egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -scroll), modifiers: egui::Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Unknown }]
+                        } else {
+                            vec![]
+                        },
+                        ..Default::default()
+                    };
+                    let s = std::time::Instant::now();
+                    ctx.run_ui(raw, |ui| app.frame(ui)).drop_without_applying_deltas();
+                    s.elapsed()
+                };
+                let first = frame(&mut app, 0.0);
+                let idle: std::time::Duration = (0..10).map(|_| frame(&mut app, 0.0)).sum::<std::time::Duration>() / 10;
+                let scroll: std::time::Duration = (0..10).map(|_| frame(&mut app, 60.0)).sum::<std::time::Duration>() / 10;
+                eprintln!("{name:16} first {:7.1} ms  idle {:6.1} ms  scrolling {:6.1} ms", first.as_secs_f64() * 1e3, idle.as_secs_f64() * 1e3, scroll.as_secs_f64() * 1e3);
+            }
+            return;
+        }
         "board" | "xml" | "jira" => {
             // n tickets over the agile sample's sprints, with epics, sub-tasks and links
             let mut q = projectfcg::app::sample::agile_release();

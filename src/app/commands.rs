@@ -365,7 +365,9 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Command> {
         (true, false, false, Key::F9) => ToggleAutoCalc,
         // View / timescale
         (true, false, false, Key::Slash) => ZoomIn,
-        (true, false, true, Key::Num8) => ZoomOut, // Ctrl+* (Shift+8)
+        // (Project's Ctrl+* is Ctrl+Shift+8 on US keyboards, which is now a
+        // view key: Ctrl+Shift+- zooms out, Ctrl+- being Delete Task)
+        (true, false, true, Key::Minus) => ZoomOut,
         (true, false, false, Key::Equals) | (true, false, false, Key::Plus) => ZoomIn,
         (false, true, false, Key::Home) => ScrollProjectStart,
         (false, true, false, Key::End) => ScrollProjectEnd,
@@ -442,7 +444,7 @@ pub const SHORTCUT_HELP: &[(&str, &str)] = &[
     ("Shift+F4", "Find next"),
     ("F9", "Calculate project"),
     ("Ctrl+F9", "Toggle automatic calculation"),
-    ("Ctrl+/ / Ctrl+*", "Zoom timescale in / out"),
+    ("Ctrl+/ / Ctrl+Shift+-", "Zoom timescale in / out"),
     ("Ctrl+mouse wheel", "Zoom timescale"),
     ("Alt+Home / Alt+End", "Timescale to project start / finish"),
     ("Alt+← / →", "Scroll timescale"),
@@ -463,6 +465,8 @@ pub const SHORTCUT_HELP: &[(&str, &str)] = &[
     ("Board: Insert / Enter / Delete", "New ticket / edit ticket / delete ticket"),
     ("Board: Ctrl+F / Esc", "Filter the tickets / clear the filter"),
     ("Ctrl+0", "Reset text size and interface zoom"),
+    ("Ctrl+Shift+1 … 0", "Gantt, Board, Calendar, Network, Task Usage, Resource Sheet, Resource Usage, Risk Register, Earned Value, System Diagram"),
+    ("Ctrl+S / Ctrl+O / Ctrl+P / F12", "Save / Open / Print / Save As, even while typing in a cell"),
     ("Ctrl+E", "Search tasks, tickets, people and risks"),
     ("Alt+Q", "Tell me: search for a command"),
     ("F1", "This list"),

@@ -130,6 +130,8 @@ pub struct OptionsDlg {
     pub autosave: bool,
     /// Experimental features (preferences).
     pub system_diagram: bool,
+    /// Show the "Search tasks, tickets, people" box (a preference).
+    pub show_item_search: bool,
     pub ev_method: crate::model::EvMethod,
     /// Earned value options for this project.
     pub ev_baseline: u8,
@@ -360,6 +362,7 @@ impl Dialogs {
             autorecover: 5,
             autosave: false,
             system_diagram: false,
+            show_item_search: false,
             ev_method: s.default_ev_method,
             ev_baseline: s.ev_baseline.min(10),
             ev_terms: s.ev_terms,
@@ -1508,6 +1511,9 @@ fn options(app: &mut ProjectFcgApp, ctx: &egui::Context) {
             ui.label("");
             ui.checkbox(&mut st.autosave, "AutoSave: save to the plan's file a few seconds after each change").on_hover_text(super::autosave_help());
             ui.end_row();
+            ui.label("");
+            ui.checkbox(&mut st.show_item_search, "Show the \"Search tasks, tickets, people\" box").on_hover_text("In the title bar, beside Tell me. Ctrl+E opens it either way, and Ctrl+F is Find.");
+            ui.end_row();
         });
         ui.add_space(6.0);
         ui.label(RichText::new("Earned value options for this project").strong());
@@ -1579,7 +1585,8 @@ pub fn apply_options(app: &mut ProjectFcgApp) {
         app.dialogs.options = Some(st);
         return;
     };
-    if app.prefs.autorecover_minutes != st.autorecover || app.prefs.autosave != st.autosave || app.prefs.experimental.system_diagram != st.system_diagram {
+    if app.prefs.autorecover_minutes != st.autorecover || app.prefs.autosave != st.autosave || app.prefs.experimental.system_diagram != st.system_diagram || app.prefs.show_item_search != st.show_item_search {
+        app.prefs.show_item_search = st.show_item_search;
         app.prefs.autorecover_minutes = st.autorecover.min(120);
         app.prefs.autosave = st.autosave;
         app.prefs.experimental.system_diagram = st.system_diagram;
