@@ -44,8 +44,10 @@ impl RowLevel {
 struct Cache {
     key: (u64, NaiveDateTime, EvPeriod, usize),
     series: EvSeries,
-    /// Every task's figures at the start of the current period.
+    /// Every task's figures at the start of the current period, and the
+    /// project's.
     period_start: Vec<EarnedValue>,
+    period_start_total: EarnedValue,
 }
 
 #[derive(Default)]
@@ -135,7 +137,8 @@ impl ProjectFcgApp {
         if self.ev_view.cache.as_ref().is_none_or(|c| c.key != key) {
             let series = self.project.earned_value_series(self.ev_view.period);
             let period_start = self.project.earned_value_at(self.ev_view.period.back(status));
-            self.ev_view.cache = Some(Cache { key, series, period_start });
+            let period_start_total = self.project.total_earned_value(&period_start);
+            self.ev_view.cache = Some(Cache { key, series, period_start, period_start_total });
         }
         self.ev_view.cache.as_ref().unwrap()
     }
@@ -419,15 +422,6 @@ fn tiles(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
     });
 }
 
-/// A left-aligned cell `w` wide.
-fn name_cell(ui: &mut egui::Ui, w: f32, label: egui::Label) -> egui::Response {
-    ui.allocate_ui_with_layout(vec2(w, 18.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.set_min_width(w);
-        ui.add(label)
-    })
-    .inner
-}
-
 fn period_table(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
     let th = super::theme::pal();
     let t = app.project.settings.ev_terms;
@@ -451,78 +445,84 @@ fn period_table(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
             ui.label("Show:");
         });
     });
-    let start = app.ev_cache().period_start.clone();
+    // (only the rows in sight are drawn: a plan can have thousands)
+    let (total_cum, total_start) = {
+        let c = app.ev_cache();
+        (c.series.now, c.period_start_total)
+    };
+    let cache = app.ev_view.cache.take();
+    let start: &[EarnedValue] = cache.as_ref().map(|c| c.period_start.as_slice()).unwrap_or(&[]);
     let p = &app.project;
     let max_level = app.ev_view.rows.max();
-    let name_w = (ui.available_width() * 0.16).clamp(130.0, 220.0);
     let rows: Vec<usize> = (0..p.tasks.len()).filter(|&i| p.tasks[i].outline_level <= max_level).collect();
-    let cur = |i: usize| p.earned_value(i);
     let mut go: Option<usize> = None;
-    let mut total_cum = p.project_earned_value();
-    total_cum.eac_method = p.settings.eac_method;
-    let total_start = p.total_earned_value(&start);
     let money = |v: f64| crate::resources::fmt_money(v, &p.settings.currency_symbol);
-    let heads = [
-        t.abbr(Metric::Pv),
-        t.abbr(Metric::Ev),
-        t.abbr(Metric::Ac),
-        t.abbr(Metric::Sv),
-        t.abbr(Metric::Cv),
-        t.abbr(Metric::Pv),
-        t.abbr(Metric::Ev),
-        t.abbr(Metric::Ac),
-        t.abbr(Metric::Sv),
-        t.abbr(Metric::Cv),
-        t.abbr(Metric::Bac),
-        t.abbr(Metric::Eac),
-        t.abbr(Metric::Vac),
-    ];
-    let cells = |e: &EarnedValue, since: &EarnedValue| -> Vec<f64> {
+    let heads = [Metric::Pv, Metric::Ev, Metric::Ac, Metric::Sv, Metric::Cv, Metric::Pv, Metric::Ev, Metric::Ac, Metric::Sv, Metric::Cv, Metric::Bac, Metric::Eac, Metric::Vac].map(|m| t.abbr(m));
+    let cells = |e: &EarnedValue, since: &EarnedValue| -> [f64; 13] {
         let d = e.since(since);
-        vec![d.bcws, d.bcwp, d.acwp, d.sv(), d.cv(), e.bcws, e.bcwp, e.acwp, e.sv(), e.cv(), e.bac, e.eac(), e.vac()]
+        [d.bcws, d.bcwp, d.acwp, d.sv(), d.cv(), e.bcws, e.bcwp, e.acwp, e.sv(), e.cv(), e.bac, e.eac(), e.vac()]
     };
-    egui::ScrollArea::both().id_salt("ev_table").auto_shrink([false, false]).show(ui, |ui| {
-        egui::Grid::new("ev_period").striped(true).spacing([12.0, 4.0]).min_col_width(64.0).show(ui, |ui| {
-            // a row for the group headings, painted across their columns below
-            ui.label("");
-            ui.end_row();
-            name_cell(ui, name_w, egui::Label::new(RichText::new("Task").strong()));
-            let mut cols: Vec<Rect> = vec![];
-            for h in heads {
-                cols.push(ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new(h).strong())).response.rect);
-            }
-            ui.end_row();
-            if cols.len() == 13 {
-                let painter = ui.painter();
-                for (a, b, g) in [(0, 4, "Current period"), (5, 9, "Cumulative to date"), (10, 12, "At completion")] {
-                    let (l, r) = (cols[a].left(), cols[b].right());
-                    let y = cols[a].top() - 6.0;
-                    painter.text(pos2((l + r) / 2.0, y - 2.0), Align2::CENTER_BOTTOM, g, FontId::proportional(super::theme::text_size()), th.heading);
-                    painter.hline(l..=r, y, Stroke::new(1.0, th.grid));
-                }
-            }
-            for &i in &rows {
+    let font = FontId::proportional(super::theme::text_size());
+    // the columns: as wide as the largest figure
+    let widest = [total_cum.bac, total_cum.eac(), total_cum.acwp, total_cum.bcws].iter().map(|v| money(*v).len()).max().unwrap_or(8).max(8);
+    let num_w = ui.painter().layout_no_wrap("8".repeat(widest + 1), font.clone(), th.text).size().x.max(70.0) + 10.0;
+    let name_w = (ui.available_width() * 0.18).clamp(140.0, 240.0);
+    let row_h = super::theme::text_size() + 9.0;
+    let total_w = name_w + num_w * 13.0 + 8.0;
+    let line = |ui: &mut egui::Ui, name: Option<(String, bool)>, vals: Option<[f64; 13]>, heads: Option<[&str; 13]>, strong: bool, stripe: bool| -> egui::Response {
+        let (r, resp) = ui.allocate_exact_size(vec2(total_w, row_h), Sense::click());
+        let painter = ui.painter_at(r);
+        if stripe {
+            painter.rect_filled(r, 0.0, th.grid.gamma_multiply(0.35));
+        }
+        // (strong text is brighter, as egui's is)
+        let ink = if strong { th.heading } else { th.text };
+        if let Some((n, summary)) = name {
+            let c = if summary || strong { th.heading } else { th.text };
+            let g = painter.layout_no_wrap(n, font.clone(), c);
+            painter.with_clip_rect(Rect::from_min_size(r.min, vec2(name_w - 6.0, row_h))).galley(pos2(r.left() + 4.0, r.center().y - g.size().y / 2.0), g, c);
+        }
+        for k in 0..13 {
+            let right = r.left() + name_w + num_w * (k as f32 + 1.0) - 6.0;
+            let (text, color) = match (&vals, &heads) {
+                (Some(v), _) => (money(v[k]), if v[k] < -0.005 { th.warn } else { ink }),
+                (_, Some(h)) => (h[k].to_string(), ink),
+                _ => continue,
+            };
+            painter.text(pos2(right, r.center().y), Align2::RIGHT_CENTER, text, font.clone(), color);
+        }
+        resp
+    };
+    egui::ScrollArea::horizontal().id_salt("ev_table_h").auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        // group headings over their columns
+        let (hr, _) = ui.allocate_exact_size(vec2(total_w, row_h + 2.0), Sense::hover());
+        for (a, b, g) in [(0, 4, "Current period"), (5, 9, "Cumulative to date"), (10, 12, "At completion")] {
+            let l = hr.left() + name_w + num_w * a as f32 + 8.0;
+            let r = hr.left() + name_w + num_w * (b as f32 + 1.0) - 4.0;
+            ui.painter().text(pos2((l + r) / 2.0, hr.bottom() - 4.0), Align2::CENTER_BOTTOM, g, font.clone(), th.heading);
+            ui.painter().hline(l..=r, hr.bottom() - 1.0, Stroke::new(1.0, th.grid));
+        }
+        line(ui, Some(("Task".into(), true)), None, Some(heads), true, false);
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), Stroke::new(1.0, th.grid));
+        let body_h = (ui.available_height() - row_h - 4.0).max(row_h * 3.0);
+        egui::ScrollArea::vertical().id_salt("ev_table_v").max_height(body_h).auto_shrink([false, true]).show_rows(ui, row_h, rows.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for k in range {
+                let i = rows[k];
                 let task = &p.tasks[i];
                 let indent = "   ".repeat(task.outline_level.saturating_sub(1) as usize);
-                let name = format!("{indent}{}", task.name);
-                let txt = if task.calc.is_summary { RichText::new(name).strong() } else { RichText::new(name) };
-                if name_cell(ui, name_w, egui::Label::new(txt).sense(Sense::click()).truncate()).on_hover_text("Double-click: go to the task").double_clicked() {
+                let since = start.get(i).copied().unwrap_or_default();
+                let resp = line(ui, Some((format!("{indent}{}", task.name), task.calc.is_summary)), Some(cells(&p.earned_value(i), &since)), None, false, k % 2 == 1);
+                if resp.on_hover_text("Double-click: go to the task").double_clicked() {
                     go = Some(i);
                 }
-                for v in cells(&cur(i), &start[i]) {
-                    let color = if v < -0.005 { th.warn } else { th.text };
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new(money(v)).color(color)));
-                }
-                ui.end_row();
             }
-            ui.label(RichText::new("Total").strong());
-            for v in cells(&total_cum, &total_start) {
-                let color = if v < -0.005 { th.warn } else { th.text };
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(RichText::new(money(v)).strong().color(color)));
-            }
-            ui.end_row();
         });
+        ui.painter().hline(ui.min_rect().x_range(), ui.min_rect().bottom(), Stroke::new(1.0, th.grid));
+        line(ui, Some(("Total".into(), true)), Some(cells(&total_cum, &total_start)), None, true, false);
     });
+    app.ev_view.cache = cache;
     if let Some(i) = go {
         app.go_to_item(Item::Task(i), false, &ctx);
     }
