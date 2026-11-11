@@ -2,6 +2,10 @@
 
 What each version added, newest first, with the bugs that reviews and fuzzing found along the way. The [README](../README.md) describes the app as it is now.
 
+## 0.15.1: 0.15's release, built
+
+0.15.0's release build failed before building anything, because `Cargo.lock` still said 0.14.0 and the release builds with `--locked`. 0.15.1 is the same app with the lock fixed. Pull requests are now checked with `--locked` (`.github/workflows/check.yml`), so this is caught before merging.
+
 ## 0.15: Privacy enforced, views from anywhere, polish
 
 - **Privacy:**
