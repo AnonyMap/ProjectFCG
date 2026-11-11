@@ -27,6 +27,9 @@ pub struct Prefs {
     pub autosave: bool,
     /// Options ▸ Experimental features.
     pub experimental: Experimental,
+    /// Options: show the "Search tasks, tickets, people" box in the title
+    /// bar (Ctrl+E opens it either way; Ctrl+F is Find).
+    pub show_item_search: bool,
 }
 
 /// Features being tried out: off until turned on in Options.
@@ -48,6 +51,7 @@ impl Default for Prefs {
             recent_actions: vec![],
             autosave: cfg!(target_arch = "wasm32"),
             experimental: Experimental::default(),
+            show_item_search: false,
         }
     }
 }
@@ -149,7 +153,7 @@ mod tests {
         let a = Prefs { text_size: 20.0, ui_zoom: 1.5, ..Default::default() };
         a.save(&oldest).unwrap();
         assert_eq!(load_with_migration(&new), a, "0.1–0.2 prefs are picked up");
-        let b = Prefs { text_size: 18.0, ui_zoom: 1.0, theme_mode: ThemeMode::Dark, accent: Accent::Green, autorecover_minutes: 5, recent_actions: vec!["link".into()], autosave: true, experimental: Experimental { system_diagram: true } };
+        let b = Prefs { text_size: 18.0, ui_zoom: 1.0, theme_mode: ThemeMode::Dark, accent: Accent::Green, autorecover_minutes: 5, recent_actions: vec!["link".into()], autosave: true, experimental: Experimental { system_diagram: true }, show_item_search: true };
         b.save(&older).unwrap();
         assert_eq!(load_with_migration(&new), b, "0.3 prefs win over 0.1–0.2");
         let c = Prefs { text_size: 16.0, ..Default::default() };

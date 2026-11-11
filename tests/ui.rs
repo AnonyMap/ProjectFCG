@@ -584,9 +584,9 @@ fn zoom_and_timescale_shortcuts() {
     let before = h.app.gantt.ppd;
     h.key(Key::Slash, ctrl());
     assert!(h.app.gantt.ppd > before);
-    // Ctrl+* (Shift+8 on US layouts) zooms back out
+    // Ctrl+Shift+- zooms back out (Ctrl+Shift+8, Project's Ctrl+*, is a view key)
     h.frame(vec![
-        Event::Key { key: Key::Num8, physical_key: None, pressed: true, repeat: false, modifiers: ctrl_shift() },
+        Event::Key { key: Key::Minus, physical_key: None, pressed: true, repeat: false, modifiers: ctrl_shift() },
     ]);
     assert!((h.app.gantt.ppd - before).abs() < 1e-3, "zoomed back out");
     let left = h.app.gantt.left_days;

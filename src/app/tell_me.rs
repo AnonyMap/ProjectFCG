@@ -95,7 +95,7 @@ pub fn catalog() -> Vec<Action> {
         a("export_csv", "📊", "Export Tasks as CSV", "File ▸ Share ▸ Export CSV", "", "excel spreadsheet sheets table export comma", Cmd(Command::ExportCsv)),
         a("import_jira", "📥", "Import Jira CSV", "File ▸ Share ▸ Import Jira CSV", "", "jira atlassian issues tickets import load csv", Cmd(Command::ImportJiraCsv)),
         a("export_jira", "📤", "Export Jira CSV", "File ▸ Share ▸ Export Jira CSV", "", "jira atlassian issues tickets export csv", Cmd(Command::ExportJiraCsv)),
-        a("options", "⚙", "Options", "File ▸ Settings ▸ Options", "", "settings preferences hours per day default start time currency autorecover configuration earned value terms pmi dod baseline eac method autosave auto save experimental features", Cmd(Command::Options)),
+        a("options", "⚙", "Options", "File ▸ Settings ▸ Options", "", "settings preferences hours per day default start time currency autorecover configuration earned value terms pmi dod baseline eac method autosave auto save experimental features search box title bar hide show", Cmd(Command::Options)),
         // ---- Clipboard and editing
         a("undo", "⟲", "Undo", "Quick Access ▸ Undo", "Ctrl+Z", "revert back mistake reverse", Cmd(Command::Undo)).when(|a| a.history.can_undo(), "Nothing to undo"),
         a("redo", "⟳", "Redo", "Quick Access ▸ Redo", "Ctrl+Y", "again repeat forward", Cmd(Command::Redo)).when(|a| a.history.can_redo(), "Nothing to redo"),
@@ -233,7 +233,7 @@ pub fn catalog() -> Vec<Action> {
         a("export_risks", "📤", "Export the Risk Register as CSV", "View ▸ Risk Register ▸ Export CSV", "", "risk register export excel spreadsheet report", Do(|a, _| a.pick_save(super::filebrowser::Mode::ExportRisksCsv))),
         // ---- Views and zoom
         a("zoom_in", "🔍", "Zoom In", "View ▸ Zoom ▸ Zoom In", "Ctrl+/", "timescale closer magnify", Cmd(Command::ZoomIn)),
-        a("zoom_out", "🔎", "Zoom Out", "View ▸ Zoom ▸ Zoom Out", "Ctrl+*", "timescale further shrink", Cmd(Command::ZoomOut)),
+        a("zoom_out", "🔎", "Zoom Out", "View ▸ Zoom ▸ Zoom Out", "Ctrl+Shift+-", "timescale further shrink", Cmd(Command::ZoomOut)),
         a("entire_project", "🔭", "Zoom to the Entire Project", "View ▸ Zoom ▸ Entire Project", "", "fit whole overview timescale", Cmd(Command::ZoomEntireProject)),
         a("zoom_selected", "🔬", "Zoom to Selected Tasks", "View ▸ Zoom ▸ Selected Tasks", "", "fit selection timescale", Cmd(Command::ZoomSelectedTasks)).when(task_selected, SELECT_TASK),
         a("timescale_dlg", "📏", "Timescale", "View ▸ Zoom ▸ Timescale…", "", "tiers units weeks months header nonworking time", Cmd(Command::TimescaleDlg)),

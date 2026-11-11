@@ -17,7 +17,7 @@ window.addEventListener('keydown', (e) => {
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const ctrl = (e.ctrlKey || e.metaKey) && !e.altKey;
   const fkey = /^F([1-9]|10|12)$/.test(k);
-  const ctrlKey = ctrl && ['a', 'd', 'e', 'f', 'g', 'h', 'j', 'k', 'l', 'u', 'y', '-', '=', '+', '0', '/', '>', '<', ',', '.'].includes(k);
+  const ctrlKey = ctrl && ['a', 'd', 'e', 'f', 'g', 'h', 'j', 'k', 'l', 'u', 'y', '-', '_', '=', '+', '0', '/', '>', '<', ',', '.'].includes(k);
   const altNav = e.altKey && !e.ctrlKey && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(k);
   if (fkey || ctrlKey || altNav) e.preventDefault();
 }, true);

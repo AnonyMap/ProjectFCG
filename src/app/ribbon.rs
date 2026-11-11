@@ -64,9 +64,18 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
         ui.painter().text(r.center(), Align2::CENTER_CENTER, name, FontId::proportional(13.5), col);
         if resp.clicked() {
             app.tab = tab;
-            // the Board tab is a workspace: it shows the board
+            // the Board tab is a workspace: it shows the board, and leaving
+            // it for a tab of task commands goes back to where you were
             if tab == RibbonTab::Board && app.view.main != super::MainView::Board {
+                let before = app.view.main;
                 app.execute(Command::ShowView(super::MainView::Board), &ctx);
+                if app.view.main == super::MainView::Board {
+                    app.view_before_board = Some(before);
+                }
+            } else if matches!(tab, RibbonTab::Task | RibbonTab::Resource | RibbonTab::Project | RibbonTab::Format) && app.view.main == super::MainView::Board {
+                if let Some(v) = app.view_before_board.take() {
+                    app.execute(Command::ShowView(v), &ctx);
+                }
             }
         }
         x += w + 2.0;
@@ -83,14 +92,27 @@ pub fn show(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
     // in Office, "Tell me what you want to do" (Alt+Q)
     let room = (title.left() - 16.0) - (x + 16.0);
     let h = strip.height() - 6.0;
-    let (items_w, tell_w) = if room >= 560.0 {
+    // (Search the plan is optional: Options ▸ Show the "Search tasks,
+    // tickets, people" box; Ctrl+E opens it in Tell me's place when hidden)
+    let (items_w, tell_w) = if !app.prefs.show_item_search {
+        (0.0, if room >= 160.0 { room.min(300.0) } else { 0.0 })
+    } else if room >= 560.0 {
         (330.0, 220.0)
     } else if room >= 330.0 {
         (room - 150.0, 140.0)
     } else {
         (0.0, 0.0)
     };
-    if items_w > 0.0 {
+    if items_w == 0.0 && tell_w > 0.0 {
+        let left = x + 16.0 + (room - tell_w) / 2.0;
+        let rt = Rect::from_min_size(pos2(left, strip.top() + 3.0), vec2(tell_w, h));
+        if app.item_search.open {
+            let ri = Rect::from_center_size(rt.center(), vec2(room.min(330.0), h));
+            super::item_search::search_box(app, ui, ri);
+        } else {
+            super::tell_me::search_box(app, ui, rt);
+        }
+    } else if items_w > 0.0 {
         let left = x + 16.0 + (room - items_w - tell_w - 10.0) / 2.0;
         let ri = Rect::from_min_size(pos2(left, strip.top() + 3.0), vec2(items_w, h));
         let rt = Rect::from_min_size(pos2(ri.right() + 10.0, strip.top() + 3.0), vec2(tell_w, h));
@@ -940,7 +962,7 @@ fn view_tab(app: &mut ProjectFcgApp, ui: &mut egui::Ui) {
                 if small(ui, "🔍", "Zoom In", "Zoom in (Ctrl+/)", true) {
                     app.execute(Command::ZoomIn, &ctx);
                 }
-                if small(ui, "🔎", "Zoom Out", "Zoom out (Ctrl+*)", true) {
+                if small(ui, "🔎", "Zoom Out", "Zoom out (Ctrl+Shift+-)", true) {
                     app.execute(Command::ZoomOut, &ctx);
                 }
             });
