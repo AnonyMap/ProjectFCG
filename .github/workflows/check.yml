@@ -1,0 +1,31 @@
+# Quick checks on every pull request, before anything is merged:
+# - Cargo.lock is up to date. The release build uses --locked, and 0.15.0's
+#   release failed on a lock that still said 0.14.0.
+# - Everything compiles (app, tests, examples), with --locked.
+# The full test suite runs in the release workflow (and locally).
+name: Checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cargo.lock is up to date
+        run: |
+          if ! cargo metadata --locked --format-version 1 > /dev/null; then
+            echo "::error::Cargo.lock is out of date. Run cargo build and commit Cargo.lock, or the release build (--locked) fails."
+            exit 1
+          fi
+      - name: Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+      - name: Everything compiles
+        run: cargo check --locked --all-targets
