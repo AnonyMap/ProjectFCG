@@ -34,7 +34,8 @@ Download the latest file for your system from the [Releases page](https://github
 
 **In a browser, with nothing to install**
 
-- Download `ProjectFCG-…-web.html` and double-click it. It opens in Chrome or Edge straight from disk, with no web server and no internet connection. It's the whole app in one 5 MB file, so it works where installing software isn't allowed.
+- **Online:** open [anonymap.github.io/ProjectFCG](https://anonymap.github.io/ProjectFCG/) in Chrome or Edge (add `?sample` for the sample plan). There's no account and no sign-in, and it's always the latest version from `main`. Your plans are opened from and saved to your own disk, and never uploaded: GitHub only serves the app. It needs a connection to start.
+- **Offline:** download `ProjectFCG-…-web.html` and double-click it. It opens in Chrome or Edge straight from disk, with no web server and no internet connection. It's the whole app in one 5 MB file, so it works where installing software isn't allowed.
 - **Saving works as on the desktop in Chrome and Edge.** Ctrl+S writes back to the file you opened (the browser asks once per file for permission to save to it), and **AutoSave** then keeps the file saved in the background a few seconds after each change. Unsaved work is also kept in the browser and offered back if the tab closes, and closing the tab with unsaved changes asks first.
 - **Firefox and Safari can't write into files.** They don't have the File System Access API, so a web page can only hand them a download. There, each Save downloads a new copy and AutoSave can't keep a file up to date. Use Chrome or Edge, or the desktop app. In Brave, turn on `brave://flags/#file-system-access-api`.
 - **What's different:**
