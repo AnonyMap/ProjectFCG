@@ -8,6 +8,18 @@ The build is **one file, `ProjectFCG.html`** (about 5 MB), with the whole app in
 
 Get it from a release, or the latest build from the `web-build` branch (`https://github.com/AnonyMap/ProjectFCG/raw/web-build/ProjectFCG.html`). Add `?sample` to the address to open the sample plan.
 
+## Online (GitHub Pages)
+
+The same file is served at **https://anonymap.github.io/ProjectFCG/**:
+
+- **Source:** GitHub Pages publishes the `web-build` branch (Settings ▸ Pages ▸ Deploy from a branch ▸ `web-build`, `/ (root)`). Every push to `main` rebuilds it, so the site is always the latest `main`. The branch has a `.nojekyll` file, so Pages serves the page exactly as built.
+- **No account:** nobody needs one to use it.
+- **Plans stay local:** they're opened from and saved to the visitor's own disk (Chrome and Edge write into the file; Firefox and Safari download a copy). The page's Content Security Policy forbids it to send anything anywhere. GitHub sees only that the page was loaded.
+- **Differences from the file:**
+  - it needs a connection to start;
+  - each site has its own browser storage, so preferences and AutoRecover aren't shared with copies opened from disk;
+  - a release's HTML file is fixed at that version, while the site changes with `main`.
+
 How a single file can work: browsers won't load JavaScript modules or fetch other files from `file://`. So `web/bundle.py` builds the page from plain scripts only:
 - the browser shim, `web/pfcg.js`;
 - wasm-bindgen's `no-modules` loader;
